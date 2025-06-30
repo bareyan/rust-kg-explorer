@@ -1,0 +1,18 @@
+[package]
+name = "kg-explorer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+flate2 = "1.1.2"
+oxigraph = "0.4.11"
+oxrdfio = "0.1.8"
+percent-encoding = "2.3.1"
+regex = "1.11.1"
+reqwest = {version = "0.12.20", features=["blocking"]}
+url = "2.5.4"
+uuid = { version = "1.17.0", features = ["v4"] }
+
+
+[profile.dev]
+opt-level = 3
