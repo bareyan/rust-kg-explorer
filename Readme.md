@@ -36,7 +36,3 @@ Common Crawl corpus and created multiple schema.org class-specific subsets.
 
 - `src/`: Contains all Rust source files.
 - `data/`: Stores the downloaded and preprocessed KG data.
-
-## License
-
-This project is licensed under the MIT License.
