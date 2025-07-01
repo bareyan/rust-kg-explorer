@@ -18,6 +18,11 @@ use crate::utils::{self, extract_literal, verify_valid};
 use crate::item;
 
 
+pub enum StoreError {
+    EvaluationError(String),
+    UnsupportedError
+}
+
 pub struct KG{
     pub dataset: String,
     download_path: String,
@@ -124,7 +129,7 @@ impl KG{
             let ignored_lines_count = Arc::new(AtomicUsize::new(0));
             // Load the graph from the nt files
             for i in 0..self.nb_parts {
-                let part_path = format!("./data/{}/part_{}.nt", self.dataset.to_lowercase(), i);
+                let part_path = format!("./data/{}/part_{}.nt", self.dataset, i);
                 let reader = File::open(&part_path).expect("Failed to open part file");
                 let parser = RdfParser::from_format(RdfFormat::NTriples);
                 let count_clone = Arc::clone(&ignored_lines_count);
@@ -155,7 +160,7 @@ impl KG{
             LIMIT {}
             OFFSET {}
         ", object_type, limit, offset);
-        let result = self.query(&q);
+        let result = self.query(&q).unwrap_or(vec![]);
         let mut res = vec![];
 
         for sol in result{
@@ -187,9 +192,9 @@ impl KG{
                     }}
                     LIMIT 1
                 ", named_node);
-                let typer = self.query(&type_query);
-                let namer = self.query(&name_query);
-                let descriptionr = self.query(&description_query);
+                let typer = self.query(&type_query).unwrap_or(vec![]);
+                let namer = self.query(&name_query).unwrap_or(vec![]);
+                let descriptionr = self.query(&description_query).unwrap_or(vec![]);
 
                 let otype = if typer.is_empty() {None} else {typer.first().unwrap().get("otype")};
                 let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
@@ -230,10 +235,10 @@ impl KG{
             }}
             LIMIT 1
         ", object);
-        let typer = self.query(&type_query);
+        let typer = self.query(&type_query).unwrap_or(vec![]);
 
-        let namer = self.query(&name_query);
-        let descriptionr = self.query(&description_query);
+        let namer = self.query(&name_query).unwrap_or(vec![]);
+        let descriptionr = self.query(&description_query).unwrap_or(vec![]);
 
     
         for tp in typer{
@@ -251,11 +256,12 @@ impl KG{
         Item::new(node.into(), otypes, name, description, self.get_images(object))
     }
     
-    pub fn query(&self, query: &str ) -> Vec<QuerySolution> {
+    pub fn query(&self, query: &str ) -> Result<Vec<QuerySolution>, StoreError> {
         if let Some(store) = &self.store {
-            let result = store.query(query).expect("Failed to execute query");
+           
+            let result = store.query(query);
             match result {
-                QueryResults::Solutions(query_solution_iter) => {
+                Ok(QueryResults::Solutions(query_solution_iter)) => {
                     let mut  result: Vec<QuerySolution> = vec![];
                     for sol in query_solution_iter{
                         match sol {
@@ -265,9 +271,10 @@ impl KG{
                             Err(_) => panic!("Some error accured with the request"),
                         }
                     }
-                    result
+                    Ok(result)
                 },
-                _ => panic!("This type of requests are not yet supported")
+                Ok(_) => Err(StoreError::UnsupportedError),
+                Err(e) =>Err( StoreError::EvaluationError(e.to_string()))
             }
         } else {
             panic!("Store is not initialized");
@@ -291,7 +298,7 @@ impl KG{
           }}
         }} 
     "#, object);
-    let images = self.query(&query_image);
+    let images = self.query(&query_image).unwrap_or(vec![]);
     let mut imgs = vec![];
     for img in images{
         let img_path = extract_literal(img.get("img")).unwrap_or("".to_string());

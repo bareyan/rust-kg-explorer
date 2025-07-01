@@ -176,6 +176,77 @@ pub(crate) fn query_page(nb_results:usize, table_rows_js_array:&str, table_heade
 "#)
 
 }
+
+
+
+pub(crate) fn query_error_page(err: &str)->String{
+  format!(r#"
+  <!DOCTYPE html>
+  <html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SPARQL Query Interface</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      td {{ max-width: 300px; overflow-x: auto; word-break: break-word; }}
+    </style>
+  </head>
+  <body >
+  
+  <div class="container py-5">
+    <a href="/" class="text-decoration-none"><h1 class="mb-4 text-center">SPARQL Query Engine</h1></a>
+  
+    <form method="GET" id="queryForm">
+      <div class="mb-3">
+        <label for="sparqlQuery" class="form-label">Enter SPARQL Query:</label>
+        <textarea
+          class="form-control"
+          id="sparqlQuery"
+          name="query"
+          rows="10"
+          placeholder="WRITE YOUR SPARQL QUERY HERE..."
+        ></textarea>
+      </div>
+      <div class="text-end">
+        <button type="submit" class="btn btn-primary">Execute Query</button>
+      </div>
+    </form>
+  
+    <div class="alert alert-danger" > {err}</div>
+  
+  <script>
+    const textarea = document.getElementById("sparqlQuery");
+  
+    // SPARQL query editor tab support
+    textarea.addEventListener("keydown", function(e) {{
+      if (e.key === "Tab") {{
+        e.preventDefault();
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + "\t" + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 1;
+      }}
+    }});
+  
+    window.addEventListener("DOMContentLoaded", () => {{
+      const params = new URLSearchParams(window.location.search);
+      const query = params.get("query");
+      const defaultQuery = `SELECT * WHERE {{
+    ?s ?p ?o
+  }}`;
+      textarea.value = (query && query.trim() !== "") ? query : defaultQuery;
+      if (tableData.length > 0) renderTable();
+    }});
+  </script>
+  
+  </body>
+  </html>"#)
+}
+
 pub(crate) fn entity_page(uri:&str, name:&str, description:&str, otype:&str, image:&str, table_1:&str, table_2: &str) ->String{
     format!(r#"<html data-bs-theme="dark">
         <head>  

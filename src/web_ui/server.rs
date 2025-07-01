@@ -1,10 +1,12 @@
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use std::thread;
 
 use crate::store::KG;
 use crate::utils::{escape_html, schema_link, to_link};
-use crate::web_ui::html_templates::{self, entity_page, query_page};
-
+use crate::web_ui::html_templates::{self, entity_page, query_error_page, query_page};
+use crate::store::StoreError;
 enum Page {
     Index,
     Explore(String, u32),
@@ -14,13 +16,13 @@ enum Page {
 }
 
 pub(crate) struct WebServer {
-    dataset: KG,
+    dataset: Arc<KG>,
     port: u32,
 }
 
 impl WebServer {
     pub fn new(dataset: &str, port: u32) -> WebServer {
-        let kg = KG::new(dataset, 1);
+        let kg = Arc::new(KG::new(dataset, 1));
         WebServer { dataset: kg, port }
     }
 
@@ -29,8 +31,23 @@ impl WebServer {
         println!("Listening on http://127.0.0.1:{}", self.port);
 
         for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            self.handle_connection(stream);
+            match stream {
+                Ok(stream) => {
+                    // Clone the dataset or Arc it if needed
+                    let dataset_clone = self.dataset.clone(); // This requires `Arc<KG>`
+                    thread::spawn(move || {
+                        // Create a temporary WebServer struct (or refactor handle_connection)
+                        let server = WebServer {
+                            dataset: dataset_clone,
+                            port: 0, // not used in handler
+                        };
+                        server.handle_connection(stream);
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to accept connection: {}", e);
+                }
+            }
         }
     }
 
@@ -179,32 +196,45 @@ navigation += "</div>";
     let mut table_data = vec![];
     let mut headers = vec![];
 
+
     if !q.is_empty() {
         let query_result = self.dataset.query(q);
-
-        headers = query_result[0].variables()
-            .into_iter()
-            .map(|var| var.clone().into_string())
-            .collect::<Vec<String>>();
-
-        for r in query_result {
-            let row = r.values().into_iter().map(|v| {
-                match v {
-                    Some(t) => {
-                        let val = t.to_string();
-                        if val.starts_with('<') && val.ends_with('>') {
-                            let inner = &val[1..val.len() - 1];
-                            format!("<{}>", inner) // Keep brackets for now, interpreted in JS
-                        } else {
-                            val
-                        }
+        match query_result{
+            Ok(res) => {
+                if !res.is_empty() {
+                    headers = res[0].variables()
+                        .into_iter()
+                        .map(|var| var.clone().into_string())
+                        .collect::<Vec<String>>();
+        
+                    for r in res {
+                        let row = r.values().into_iter().map(|v| {
+                            match v {
+                                Some(t) => {
+                                    let val = t.to_string();
+                                    if val.starts_with('<') && val.ends_with('>') {
+                                        let inner = &val[1..val.len() - 1];
+                                        format!("<{}>", inner) // Keep brackets for now, interpreted in JS
+                                    } else {
+                                        val
+                                    }
+                                }
+                                None => "None".to_owned(),
+                            }
+                        }).collect::<Vec<String>>();
+                        table_data.push(row);
                     }
-                    None => "None".to_owned(),
                 }
-            }).collect::<Vec<String>>();
-            table_data.push(row);
+            }
+            Err(StoreError::EvaluationError (ee)) =>{
+                return query_error_page(&ee)
+            },
+            Err(StoreError::UnsupportedError) => {
+                return query_error_page("The query is not yet supported")
+            }
         }
     }
+
     let result_rows = table_data.len();
 
     // JavaScript-safe string
@@ -231,7 +261,7 @@ navigation += "</div>";
         {entity} ?pred ?obj .
       }}
       "#);
-      let table_1_data = self.dataset.query(&table_1_query);
+      let table_1_data = self.dataset.query(&table_1_query).unwrap_or(vec![]);
       let mut table_1 = String::new();
       for row in table_1_data{
 
@@ -247,7 +277,7 @@ navigation += "</div>";
         ?sub ?pred {entity} .
       }}
       "#);
-      let table_2_data = self.dataset.query(&table_2_query);
+      let table_2_data = self.dataset.query(&table_2_query).unwrap_or(vec![]);
       let mut table_2 = String::new();
       for row in table_2_data{
         table_2+=&format!("<tr>
