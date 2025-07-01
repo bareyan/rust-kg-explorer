@@ -848,6 +848,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "reqwest",
+ "thiserror",
  "url",
  "uuid",
 ]
