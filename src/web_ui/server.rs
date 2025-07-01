@@ -21,8 +21,8 @@ pub(crate) struct WebServer {
 }
 
 impl WebServer {
-    pub fn new(dataset: &str, port: u32) -> WebServer {
-        let kg = Arc::new(KG::new(dataset, 1));
+    pub fn new(kg: KG, port: u32) -> WebServer {
+        let kg = Arc::new(kg);
         WebServer { dataset: kg, port }
     }
 
@@ -33,13 +33,11 @@ impl WebServer {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    // Clone the dataset or Arc it if needed
-                    let dataset_clone = self.dataset.clone(); // This requires `Arc<KG>`
+                    let dataset_clone = self.dataset.clone();
                     thread::spawn(move || {
-                        // Create a temporary WebServer struct (or refactor handle_connection)
                         let server = WebServer {
                             dataset: dataset_clone,
-                            port: 0, // not used in handler
+                            port: 0,
                         };
                         server.handle_connection(stream);
                     });
@@ -98,11 +96,6 @@ impl WebServer {
             route if route.starts_with("/entity/") => {
               let entity_name = &full_path["/entity/".len()..];
               ("HTTP/1.1 200 OK", Page::Entity(entity_name.to_string().replace("%3C", "<").replace("%3E", ">")))
-              // let decoded = entity_name;
-              // match decoded {
-              //     Ok(name) => ("HTTP/1.1 200 OK", Page::Entity(name.to_string())),
-              //     Err(_) => ("HTTP/1.1 400 BAD REQUEST", Page::Error),
-              // }
           }
             "/entity" => ("HTTP/1.1 400 BAD REQUEST", Page::Entity("dfa".to_owned())),
             _ => ("HTTP/1.1 404 NOT FOUND", Page::Error),

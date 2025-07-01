@@ -26,12 +26,12 @@ pub enum StoreError {
 pub struct KG{
     pub dataset: String,
     download_path: String,
-    nb_parts: u16,
+    nb_parts: u32,
     store: Option<Store>,
 }
 
 impl KG{
-    pub fn new(dataset_name: &str, nb_parts: u16) -> KG{
+    pub fn new(dataset_name: &str, nb_parts: u32) -> KG{
         let mut created = KG {
             dataset: dataset_name.to_string(), 
             download_path: format!("https://data.dws.informatik.uni-mannheim.de/structureddata/2024-12/quads/classspecific/{}/part_", dataset_name), 
@@ -45,7 +45,18 @@ impl KG{
         created.load();
         created
     }
-    
+    pub fn from_file(dataset_path: &str) ->KG {
+        let mut created = KG{
+            dataset: dataset_path.to_string(),
+            download_path: String::new(),
+            nb_parts: 1,
+            store: None
+        };
+        created.load_file(dataset_path);
+        created
+    }
+
+
     fn download_dataset(&self) {
         let mut now = Instant::now();
 
@@ -120,6 +131,47 @@ impl KG{
         
     }
 
+
+
+    fn load_file(&mut self, file_path:&str){
+        let filename = match file_path.split("/").last(){
+            Some(f) => f,
+            None => panic!("Invalid file path"),
+        };
+        let file_format = match filename.split(".").last(){
+            Some(f) => match f {
+                "ttl" => RdfFormat::Turtle,
+                "nt" => RdfFormat::NTriples,
+                "nq" => RdfFormat::NQuads,
+                _ =>  panic!("Format not supported")
+            },
+            None => panic!("Provide a file with the following extentions: .ttl, .nt, .nq"),
+        };
+        let store = Store::open(format!("./data/{}.db", filename)).expect("Failed to load database");
+        let is_empty = store.is_empty().expect("Failed to check if store is empty");
+        if is_empty {
+            let ignored_lines_count = Arc::new(AtomicUsize::new(0));
+            let reader = File::open(file_path).expect("Failed to open part file");
+            let parser = RdfParser::from_format(file_format);
+            let count_clone = Arc::clone(&ignored_lines_count);
+
+            store
+                .bulk_loader().with_num_threads(16)
+                .on_parse_error(move |_err| {
+                    count_clone.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .load_from_reader(parser, reader)
+                .expect("Failed to load file");
+
+        
+            let final_count = ignored_lines_count.load(Ordering::Relaxed);
+            println!("Data loading complete. Total ignored lines: {}", final_count);
+        } else {
+            println!("Graph loaded");
+        }
+        self.store = Some(store);
+    }
     fn load(&mut self) {
         let now = Instant::now();
         // Load the oxigraph database
