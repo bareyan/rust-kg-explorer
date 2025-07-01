@@ -191,19 +191,11 @@ impl KG{
                 let namer = self.query(&name_query);
                 let descriptionr = self.query(&description_query);
 
-                
-                if typer.is_empty() || namer.is_empty() || descriptionr.is_empty() {
-                    panic!("Typer, namer or descriptioner is empty!");
-                }
                 let otype = if typer.is_empty() {None} else {typer.first().unwrap().get("otype")};
                 let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
                 let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.first().unwrap().get("description"))};
               
                 
-                if otype.is_none(){
-                    panic!("otype is None, unable to provide info");
-                }
-
                 let images = self.get_images(&named_node.to_string());
                 Item::new(
                     named_node.into(),
@@ -251,9 +243,6 @@ impl KG{
             
         
         // let otype = if typer.is_empty() {None} else {typer.iter().next().unwrap().get("otype")};
-        if namer.is_empty() || descriptionr.is_empty(){
-            panic!("namer or descriptionr is empty, unable to provide details!");
-        }
         let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
         let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.first().unwrap().get("description"))};
       
