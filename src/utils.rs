@@ -4,18 +4,25 @@ use regex::{Match, Regex};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::io::{BufWriter, Write};
+use thiserror::Error;
 use url::Url;
 
+#[derive(Error, Debug)]
 pub enum PreprocessError {
-    OpenFile(std::io::Error),
-    CreateFile(std::io::Error),
-    ReadFile(std::io::Error),
+    #[error("Failed to open the file {0} due to {1}")]
+    OpenFile(String, std::io::Error),
+    #[error("Failed to create the file {0} due to {1}")]
+    CreateFile(String, std::io::Error),
+    #[error("Failed reading the file {0} due to {1}")]
+    ReadFile(String, std::io::Error),
 }
 
 pub(crate) fn preprocess(nquads_file: &str) -> Result<(), PreprocessError> {
-    let infile = File::open(nquads_file).map_err(PreprocessError::OpenFile)?;
+    let infile = File::open(nquads_file)
+        .map_err(|e| PreprocessError::OpenFile(nquads_file.to_string(), e))?;
+    let cr_file_name = format!("{}.nt", nquads_file);
     let outfile =
-        File::create(format!("{}.nt", nquads_file)).map_err(PreprocessError::CreateFile)?;
+        File::create(&cr_file_name).map_err(|e| PreprocessError::CreateFile(cr_file_name, e))?;
 
     let mut reader = BufReader::new(infile);
     let mut writer = BufWriter::new(outfile);
@@ -28,7 +35,7 @@ pub(crate) fn preprocess(nquads_file: &str) -> Result<(), PreprocessError> {
 
     while reader
         .read_line(&mut line)
-        .map_err(PreprocessError::ReadFile)?
+        .map_err(|e| PreprocessError::ReadFile(nquads_file.to_string(), e))?
         != 0
     {
         line = line

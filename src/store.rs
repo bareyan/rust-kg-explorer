@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use flate2::read::GzDecoder;
+use thiserror::Error;
 use std::vec;
 use std::path::Path;
 use oxigraph::model::{NamedNode, Term};
@@ -14,8 +15,36 @@ use oxigraph::sparql::{QueryResults, QuerySolution};
 use oxigraph::io::{RdfParser, RdfFormat};
 use item::Item;
 
-use crate::utils::{self, extract_literal, verify_valid};
+use crate::utils::{self, extract_literal, verify_valid, PreprocessError};
 use crate::item;
+
+#[derive(Error, Debug)]
+pub enum DownloadError{
+    #[error("Failed to create the directory {0} due to {1}")]
+    CreateDir(String, std::io::Error),
+    #[error("Failed to build an HTTP client due to {0}")]
+    BuildHTTPClient(reqwest::Error),
+    #[error("Failed to download part {0} due to {1}")]
+    DownloadPart(usize, reqwest::Error),
+    #[error("Failed to load bytes from the response due to {0}")]
+    ExtractResponse(reqwest::Error),
+    #[error("Failed to open the file {0} due to {1}")]
+    OpenFile(String, std::io::Error),
+    #[error("Failed open the part file {0} due to {1}")]
+    OpenPartFile(String, std::io::Error),
+    #[error("Failed to create the output file {0} due to {1}")]
+    CreateOutputFile(String, std::io::Error),
+    #[error("Failed to unzip the part file {0} to the output file {1} due to {2}")]
+    UnzipPartFile(String, String, std::io::Error),
+    #[error("Failed to preprocess the output file due to {0}")]
+    Preprocess(PreprocessError),
+    #[error("Failed to remove the part file {0} due to {1}")]
+    RemovePartFile(String, std::io::Error),
+    #[error("Failed to remove unzipped file {0} due to {1}")]
+    RemoveUnzippedFile(String, std::io::Error),
+    #[error("Failed to create the part file {0} that is downloaded due to {1}")]
+    CreatePartFile(String, std::io::Error),
+}
 
 
 pub enum StoreError {
@@ -57,7 +86,7 @@ impl KG{
     }
 
 
-    fn download_dataset(&self) {
+    fn download_dataset(&self) -> Result<(), DownloadError> {
         let mut now = Instant::now();
 
         //Path to the directory where the dataset rdfs will be stored
@@ -65,7 +94,7 @@ impl KG{
 
         //Creating the directory if it does not exist
         if !Path::new(&path).exists() {
-            std::fs::create_dir_all(&path).expect("Failed to create directory");
+            std::fs::create_dir_all(&path).map_err(|e| DownloadError::CreateDir(path.clone(), e))?;
         }
 
         // Check that all of the parts are downloaded, download them if not
@@ -82,15 +111,12 @@ impl KG{
                 let client = reqwest::blocking::Client::builder()
                     .timeout(std::time::Duration::from_secs(300))  // 5 minutes timeout
                     .build()
-                    .expect("Failed to build HTTP client");
-                let response = client.get(&url).send().expect("Failed to download part");
-                let mut f = std::fs::OpenOptions::new().create(true).write(true).open(&part_path).unwrap();
-                if let Ok(bytes) = response.bytes(){
-                    let _ = f.write_all(&bytes);
-                    println!("Downloaded part {} to {}", i, part_path);
-                }else{
-                    panic!("Failed to load bytes from the response!");
-                }
+                    .map_err(DownloadError::BuildHTTPClient)?;
+                let response = client.get(&url).send().map_err(|e| DownloadError::DownloadPart(i as usize, e))?;
+                let mut f = std::fs::OpenOptions::new().create(true).write(true).open(&part_path).map_err(|e| DownloadError::CreatePartFile(part_path.clone(), e))?;
+                let bytes =response.bytes().map_err(DownloadError::ExtractResponse)?;
+                let _ = f.write_all(&bytes);
+                println!("Downloaded part {} to {}", i, part_path);
             }
         }
 
@@ -105,11 +131,10 @@ impl KG{
             if Path::new(&output_path).exists() ||  Path::new(&part_path.replace(".gz", ".nt")).exists() {
                 println!("Part {} already unzipped, skipping.", i);
             } else {
-                let mut decoder = GzDecoder::new(File::open(&part_path).expect("Failed to open part file"));
-                let mut output = File::create(&output_path).expect("Failed to create output file");
-                std::io::copy(&mut decoder, &mut output).expect("Failed to unzip part file");
+                let mut decoder = GzDecoder::new(File::open(&part_path).map_err(|e| DownloadError::OpenPartFile(part_path.clone(), e))?);
+                let mut output = File::create(&output_path).map_err(|e| DownloadError::CreateOutputFile(output_path.clone(), e))?;
+                std::io::copy(&mut decoder, &mut output).map_err(|e| DownloadError::UnzipPartFile(part_path.clone(), output_path.clone(), e))?;
                 println!("Unzipped part {} to {}", i, output_path);
-                
             }
         }
         println!("Unzipped part files in {:.2?}", now.elapsed());
@@ -119,14 +144,15 @@ impl KG{
             let part_path = format!("./data/{}/part_{}.gz", self.dataset, i);
             let output_path = format!("./data/{}/part_{}", self.dataset, i);
             if Path::new(&output_path).exists() &&  !Path::new(&part_path.replace(".gz", ".nt")).exists() {
-                utils::preprocess(&output_path);
+                utils::preprocess(&output_path).map_err(DownloadError::Preprocess)?;
 
                 //delete the gz and and unzipped file
-                std::fs::remove_file(&part_path).expect("Failed to delete part file");
-                std::fs::remove_file(&output_path).expect("Failed to delete unzipped file");
+                std::fs::remove_file(&part_path).map_err(|e| DownloadError::RemovePartFile(part_path.clone(), e))?;
+                std::fs::remove_file(&output_path).map_err(|e| DownloadError::RemoveUnzippedFile(output_path.clone(), e))?;
             }
         }
         println!("Preprocessed part files in {:.2?}", now.elapsed());
+        Ok(())
     
         
     }
