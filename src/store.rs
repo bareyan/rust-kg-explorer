@@ -212,7 +212,7 @@ impl KG{
             LIMIT {}
             OFFSET {}
         ", object_type, limit, offset);
-        let result = self.query(&q).unwrap_or(vec![]);
+        let result = self.query(&q).unwrap_or_default();
         let mut res = vec![];
 
         for sol in result{
@@ -244,9 +244,9 @@ impl KG{
                     }}
                     LIMIT 1
                 ", named_node);
-                let typer = self.query(&type_query).unwrap_or(vec![]);
-                let namer = self.query(&name_query).unwrap_or(vec![]);
-                let descriptionr = self.query(&description_query).unwrap_or(vec![]);
+                let typer = self.query(&type_query).unwrap_or_default();
+                let namer = self.query(&name_query).unwrap_or_default();
+                let descriptionr = self.query(&description_query).unwrap_or_default();
 
                 let otype = if typer.is_empty() {None} else {typer.first().unwrap().get("otype")};
                 let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
@@ -287,10 +287,10 @@ impl KG{
             }}
             LIMIT 1
         ", object);
-        let typer = self.query(&type_query).unwrap_or(vec![]);
+        let typer = self.query(&type_query).unwrap_or_default();
 
-        let namer = self.query(&name_query).unwrap_or(vec![]);
-        let descriptionr = self.query(&description_query).unwrap_or(vec![]);
+        let namer = self.query(&name_query).unwrap_or_default();
+        let descriptionr = self.query(&description_query).unwrap_or_default();
 
     
         for tp in typer{
@@ -350,7 +350,7 @@ impl KG{
           }}
         }} 
     "#, object);
-    let images = self.query(&query_image).unwrap_or(vec![]);
+    let images = self.query(&query_image).unwrap_or_default();
     let mut imgs = vec![];
     for img in images{
         let img_path = extract_literal(img.get("img")).unwrap_or("".to_string());
