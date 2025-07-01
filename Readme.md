@@ -28,7 +28,7 @@ Common Crawl corpus and created multiple schema.org class-specific subsets.
    ```
    Example:
    ```
-   cargo run my_dataset
+   cargo run Book
    ```
 4. Open your browser and navigate to: [http://127.0.0.1:8080](http://127.0.0.1:8080)
 
