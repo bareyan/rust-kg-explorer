@@ -30,7 +30,7 @@ impl KG{
         let mut created = KG {
             dataset: dataset_name.to_string(), 
             download_path: format!("https://data.dws.informatik.uni-mannheim.de/structureddata/2024-12/quads/classspecific/{}/part_", dataset_name), 
-            nb_parts: nb_parts,
+            nb_parts,
             store: None
         };
         //Check if the store is not yet created and download the dataset if needed
@@ -69,10 +69,15 @@ impl KG{
                     .expect("Failed to build HTTP client");
                 let response = client.get(&url).send().expect("Failed to download part");
                 let mut f = std::fs::OpenOptions::new().create(true).write(true).open(&part_path).unwrap();
-                let _ = f.write_all(&mut response.bytes().unwrap());
-                println!("Downloaded part {} to {}", i, part_path);
+                if let Ok(bytes) = response.bytes(){
+                    let _ = f.write_all(&bytes);
+                    println!("Downloaded part {} to {}", i, part_path);
+                }else{
+                    panic!("Failed to load bytes from the response!");
+                }
             }
         }
+
         println!("Downloaded part files in {:.2?}", now.elapsed());
         now = Instant::now();
         //Unzip the part files
@@ -187,11 +192,17 @@ impl KG{
                 let descriptionr = self.query(&description_query);
 
                 
-                let otype = if typer.is_empty() {None} else {typer.iter().next().unwrap().get("otype")};
-                let name = if namer.is_empty() {None} else {extract_literal(namer.iter().next().unwrap().get("name"))};
-                let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.iter().next().unwrap().get("description"))};
+                if typer.is_empty() || namer.is_empty() || descriptionr.is_empty() {
+                    panic!("Typer, namer or descriptioner is empty!");
+                }
+                let otype = if typer.is_empty() {None} else {typer.first().unwrap().get("otype")};
+                let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
+                let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.first().unwrap().get("description"))};
               
                 
+                if otype.is_none(){
+                    panic!("otype is None, unable to provide info");
+                }
 
                 let images = self.get_images(&named_node.to_string());
                 Item::new(
@@ -240,11 +251,14 @@ impl KG{
             
         
         // let otype = if typer.is_empty() {None} else {typer.iter().next().unwrap().get("otype")};
-        let name = if namer.is_empty() {None} else {extract_literal(namer.iter().next().unwrap().get("name"))};
-        let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.iter().next().unwrap().get("description"))};
+        if namer.is_empty() || descriptionr.is_empty(){
+            panic!("namer or descriptionr is empty, unable to provide details!");
+        }
+        let name = if namer.is_empty() {None} else {extract_literal(namer.first().unwrap().get("name"))};
+        let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.first().unwrap().get("description"))};
       
         
-        let node = NamedNode::from_str(object).unwrap();
+        let node = NamedNode::from_str(object).unwrap_or_else(|_| panic!("Failed to create object from string!"));
         Item::new(node.into(), otypes, name, description, self.get_images(object))
     }
     

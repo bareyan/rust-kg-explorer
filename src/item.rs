@@ -38,12 +38,19 @@ impl Item {
     }
 
     pub fn html_rep(&self) -> String {
-        let image = self.images.first().unwrap_or(&"".to_string()).clone();
-        let name = self.name.clone().unwrap_or("Unknown".to_string());
+        let image = self
+            .images
+            .first()
+            .map(String::as_str)
+            .unwrap_or("")
+            .to_string();
+        let name = self.name.as_deref().unwrap_or("Unknown").to_string();
         let description = self
             .description
-            .clone()
-            .unwrap_or("No description available".to_string());
+            .as_deref()
+            .unwrap_or("No description available")
+            .to_string();
+        // no unnecessary clones
 
         let id = match &self.node {
             Term::NamedNode(named_node) => named_node.as_str(),
