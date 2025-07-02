@@ -47,6 +47,25 @@ pub enum DownloadError{
 }
 
 
+#[derive(Error, Debug)]
+pub enum LoadFileError{
+    #[error("Invalid path {0} provided!")]
+    InvalidPath(String),
+    #[error("Unsupported format {0} provided!")]
+    UnsupportedFormat(String),
+    #[error("No format provided!")]
+    NoFormatProvided,
+    #[error("Failed to load database due to {0}")]
+    LoadDatabase(oxigraph::store::StorageError),
+    #[error("Failed to check if the store is empty due to {0}!")]
+    EmptyCheckAction(oxigraph::store::StorageError),
+    #[error("Failed to open part file {0} due to {1}")]
+    OpenPartFile(String, std::io::Error),
+    #[error("Failed to load store file due to {0}!")]
+    LoadStoreFile(oxigraph::store::LoaderError),
+}
+
+
 pub enum StoreError {
     EvaluationError(String),
     UnsupportedError
@@ -159,25 +178,25 @@ impl KG{
 
 
 
-    fn load_file(&mut self, file_path:&str){
+    fn load_file(&mut self, file_path:&str) -> Result<(), LoadFileError>{
         let filename = match file_path.split("/").last(){
             Some(f) => f,
-            None => panic!("Invalid file path"),
+            None => {return Err(LoadFileError::InvalidPath(file_path.to_string()))},
         };
         let file_format = match filename.split(".").last(){
             Some(f) => match f {
                 "ttl" => RdfFormat::Turtle,
                 "nt" => RdfFormat::NTriples,
                 "nq" => RdfFormat::NQuads,
-                _ =>  panic!("Format not supported")
+                _ =>  {return Err(LoadFileError::UnsupportedFormat(f.to_string()))}
             },
-            None => panic!("Provide a file with the following extentions: .ttl, .nt, .nq"),
+            None => {return Err(LoadFileError::NoFormatProvided)}
         };
-        let store = Store::open(format!("./data/{}.db", filename)).expect("Failed to load database");
-        let is_empty = store.is_empty().expect("Failed to check if store is empty");
+        let store = Store::open(format!("./data/{}.db", filename)).map_err(|e| LoadFileError::LoadDatabase(e))?;
+        let is_empty = store.is_empty().map_err(|e|LoadFileError::EmptyCheckAction(e))?;
         if is_empty {
             let ignored_lines_count = Arc::new(AtomicUsize::new(0));
-            let reader = File::open(file_path).expect("Failed to open part file");
+            let reader = File::open(file_path).map_err(|e| LoadFileError::OpenPartFile(file_path.to_string(), e))?;
             let parser = RdfParser::from_format(file_format);
             let count_clone = Arc::clone(&ignored_lines_count);
 
@@ -188,7 +207,7 @@ impl KG{
                     Ok(())
                 })
                 .load_from_reader(parser, reader)
-                .expect("Failed to load file");
+                .map_err(|e| LoadFileError::LoadStoreFile(e))
 
         
             let final_count = ignored_lines_count.load(Ordering::Relaxed);
@@ -197,6 +216,7 @@ impl KG{
             println!("Graph loaded");
         }
         self.store = Some(store);
+        Ok(())
     }
     fn load(&mut self) {
         let now = Instant::now();
