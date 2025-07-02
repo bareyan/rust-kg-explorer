@@ -7,7 +7,7 @@ mod web_ui;
 use clap::Parser;
 use web_ui::server::WebServer;
 
-use crate::store::KG;
+use crate::{store::KG};
 
 
 

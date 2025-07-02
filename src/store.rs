@@ -27,7 +27,7 @@ pub struct KG{
     pub dataset: String,
     download_path: String,
     nb_parts: u32,
-    store: Option<Store>,
+    pub store: Option<Store>,
 }
 
 impl KG{
@@ -55,8 +55,6 @@ impl KG{
         created.load_file(dataset_path);
         created
     }
-
-
     fn download_dataset(&self) {
         let mut now = Instant::now();
 
@@ -130,9 +128,6 @@ impl KG{
     
         
     }
-
-
-
     fn load_file(&mut self, file_path:&str){
         let filename = match file_path.split("/").last(){
             Some(f) => f,
@@ -304,7 +299,7 @@ impl KG{
         let description = if descriptionr.is_empty() {None} else {extract_literal(descriptionr.first().unwrap().get("description"))};
       
         
-        let node = NamedNode::from_str(object).unwrap_or_else(|_| panic!("Failed to create object from string!"));
+        let node = NamedNode::from_str(object).unwrap_or_else(|_| panic!("Failed to create object from string! {object}"));
         Item::new(node.into(), otypes, name, description, self.get_images(object))
     }
     
@@ -325,7 +320,7 @@ impl KG{
                     }
                     Ok(result)
                 },
-                Ok(_) => Err(StoreError::UnsupportedError),
+                Ok(_) => Err(StoreError::EvaluationError("It is ok, not supported".to_string())),
                 Err(e) =>Err( StoreError::EvaluationError(e.to_string()))
             }
         } else {
@@ -333,6 +328,22 @@ impl KG{
         }
     }
     
+    pub fn update(&self, query: &str) -> Result<(), StoreError>{
+        if let Some(store) = &self.store {
+           
+            let r = store.update(query);
+            match r {
+                Ok(_) => Ok(()),
+                Err(e) => Err(StoreError::EvaluationError(e.to_string())),
+            }
+        } else {
+            panic!("Store is not initialized");
+        }
+        
+
+    }
+
+
     pub fn get_images(&self, object:&str) -> Vec<String> {
         let query_image = format!(r#"
         SELECT ?img WHERE {{

@@ -4,13 +4,13 @@ use std::sync::Arc;
 use std::thread;
 
 use crate::store::KG;
-use crate::utils::{escape_html, schema_link, to_link};
-use crate::web_ui::html_templates::{self, entity_page, index_page, query_error_page, query_page};
+use crate::utils::{escape_html, linkify, schema_link, to_link};
+use crate::web_ui::html_templates::{self, entity_page, index_page, query_page};
 use crate::store::StoreError;
 enum Page {
     Index,
     Explore(String, u32),
-    Query(Option<String>),
+    Query(Option<String>, Option<String>),
     Entity(String),
     Error,
 }
@@ -72,10 +72,10 @@ impl WebServer {
             "/" => ("HTTP/1.1 200 OK", Page::Index),
             "/query" => {
               if let Some(qs) = query_string {
-                let q = percent_encoding::percent_decode_str(qs).decode_utf8().unwrap().to_string();
-                 ("HTTP/1.1 200 OK", Page::Query(Self::extract_query_param(&q, "query")))
+                // let q = percent_encoding::percent_decode_str(qs).decode_utf8().unwrap().to_string();
+                 ("HTTP/1.1 200 OK", Page::Query(Self::extract_query_param(qs, "query"), Self::extract_query_param(qs, "mode")))
               } else {
-                ("HTTP/1.1 200 OK", Page::Query(Self::extract_query_param("", "query")))
+                ("HTTP/1.1 200 OK", Page::Query(Self::extract_query_param("", "query"), None))
               }
             },
             "/explore" => {
@@ -104,8 +104,9 @@ impl WebServer {
         let contents: String = match page {
             Page::Index => self.generate_index(),
             Page::Explore(id, page) => self.generate_explore(&id, page),
-            Page::Query(Some(q)) => self.generate_query(&q),
-            Page::Query(None) =>self.generate_query(""),
+            Page::Query(Some(q), Some(mode)) => self.generate_query(&q, &mode),
+            Page::Query(None, _) =>self.generate_query("", "query"),
+            Page::Query(Some(q), None) => self.generate_query(&q, "query"),
             Page::Entity( uri) =>self.generate_entity(&uri),
             Page::Error => self.generate_error(),
         };
@@ -121,7 +122,8 @@ impl WebServer {
 
     fn extract_query_param(query: &str, key: &str) -> Option<String> {
         for pair in query.split('&') {
-            let mut parts = pair.splitn(2, '=');
+            let p  =percent_encoding::percent_decode_str(pair).decode_utf8().unwrap().to_string();
+            let mut parts = p.splitn(2, '=');
             let k = parts.next()?;
             let v = parts.next()?;
             if k == key {
@@ -193,66 +195,91 @@ navigation += "</div>";
         html_templates::explore_page(&page, &navigation)
     }
 
-    fn generate_query(&self, q: &str) -> String {
-    let mut table_data = vec![];
-    let mut headers = vec![];
+    fn generate_query(&self, q: &str, mode: &str) -> String {
+        let mut table_data = vec![];
+        let mut headers = vec![];
+        let mut message = "Query successfully executed".to_string();
+        let mut messageType = "success";
 
-
-    if !q.is_empty() {
-        let query_result = self.dataset.query(q);
-        match query_result{
-            Ok(res) => {
-                if !res.is_empty() {
-                    headers = res[0].variables()
-                        .into_iter()
-                        .map(|var| var.clone().into_string())
-                        .collect::<Vec<String>>();
-        
-                    for r in res {
-                        let row = r.values().into_iter().map(|v| {
-                            match v {
-                                Some(t) => {
-                                    let val = t.to_string();
-                                    if val.starts_with('<') && val.ends_with('>') {
-                                        let inner = &val[1..val.len() - 1];
-                                        format!("<{}>", inner) // Keep brackets for now, interpreted in JS
-                                    } else {
-                                        val
-                                    }
+        if !q.is_empty() {
+            match mode {
+                "query" => {
+                    let query_result = self.dataset.query(q);
+                    match query_result{
+                        Ok(res) => {
+                            if !res.is_empty() {
+                                headers = res[0].variables()
+                                    .into_iter()
+                                    .map(|var| var.clone().into_string())
+                                    .collect::<Vec<String>>();
+                    
+                                for r in res {
+                                    let row = r.values().into_iter().map(|v| {
+                                        match v {
+                                            Some(t) => {
+                                                let val = t.to_string();
+                                                if val.starts_with('<') && val.ends_with('>') {
+                                                    let inner = &val[1..val.len() - 1];
+                                                    format!("<{}>", inner) // Keep brackets for now, interpreted in JS
+                                                } else {
+                                                    val
+                                                }
+                                            }
+                                            None => "None".to_owned(),
+                                        }
+                                    }).collect::<Vec<String>>();
+                                    table_data.push(row);
                                 }
-                                None => "None".to_owned(),
                             }
-                        }).collect::<Vec<String>>();
-                        table_data.push(row);
+                        }
+                        Err(StoreError::EvaluationError (ee)) =>{
+                            message  = ee;
+                            messageType = "danger";
+                        },
+                        Err(StoreError::UnsupportedError) => {
+                            message = "The query is not yet supported".to_string();
+                            messageType = "danger";
+
+                        }
+                    }
+                },
+                "update" => {
+                    let query_result = self.dataset.update(q);
+                    match query_result{
+                        Ok(()) => (),
+                        Err(StoreError::EvaluationError(ee)) => {
+                            message=  ee;
+                            messageType = "danger";
+                        }
+                        _ => ()
                     }
                 }
+                _ => ()
+
             }
-            Err(StoreError::EvaluationError (ee)) =>{
-                return query_error_page(&ee)
-            },
-            Err(StoreError::UnsupportedError) => {
-                return query_error_page("The query is not yet supported")
-            }
+            
         }
-    }
 
-    let result_rows = table_data.len();
+        let result_rows = table_data.len();
 
-    // JavaScript-safe string
-    let mut table_rows_js_array = String::new();
-    for row in table_data {
-        let cells: Vec<String> = row.into_iter().map(|cell| {
-            let escaped = cell.replace('\\', "\\\\").replace('"', "\\\"");
-            format!(r#""{}""#, escaped)
-        }).collect();
-        table_rows_js_array += &format!("[{}],", cells.join(","));
+        // JavaScript-safe string
+        let mut table_rows_js_array = String::new();
+        for row in table_data {
+            let cells: Vec<String> = row.into_iter().map(|cell| {
+                let escaped = cell.replace('\\', "\\\\").replace('"', "\\\"");
+                format!(r#""{}""#, escaped)
+            }).collect();
+            table_rows_js_array += &format!("[{}],", cells.join(","));
+        }
+        let table_headers_js_array = headers.iter()
+            .map(|h| format!(r#""{}""#, h))
+            .collect::<Vec<_>>()
+            .join(",");
+        let message_box = if(q.is_empty()) {""} else {
+            &format!("<div class=\"alert alert-{}\" role=\"alert\"> {} </div>", messageType, message)
+        };
+        query_page(result_rows, &table_rows_js_array, &table_headers_js_array,message_box )
     }
-    let table_headers_js_array = headers.iter()
-        .map(|h| format!(r#""{}""#, h))
-        .collect::<Vec<_>>()
-        .join(",");
-    query_page(result_rows, &table_rows_js_array, &table_headers_js_array)
-}
 
     fn generate_entity(&self, entity: &str) -> String{
       let itm = self.dataset.details(entity);
@@ -297,16 +324,14 @@ navigation += "</div>";
       let name = &itm.name.unwrap_or("No name found".to_string());
       
       let img = if itm.images.is_empty() {
-        format!("<img src=\"https://loremipsum.imgix.net/GTlzd4xkx4LmWsG1Kw1BB/ad1834111245e6ee1da4372f1eb5876c/placeholder.com-1280x720.png?w=1920&q=60&auto=format,compress\" alt=\"{}\"    class=\"object-fit-cover d-block mx-auto\" style=\"
-          height: 200px;
-        \" /> ", name)
+        String::new()
       } else {
         format!("<img src=\"{}\" alt=\"{}\"  class=\"object-fit-cover d-block mx-auto\" style=\"
           height: 200px;
         \" />", itm.images.get(0).unwrap(), name)
       };
 
-      entity_page(entity,&name, &itm.description.unwrap_or("No description found".to_string()),  &entity_types, &img, &table_1, &table_2)
+      entity_page(&linkify(&entity),&name, &itm.description.unwrap_or("No description found".to_string()),  &entity_types, &img, &table_1, &table_2)
     }
 
     fn generate_error(&self) -> String {

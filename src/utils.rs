@@ -96,6 +96,17 @@ pub fn schema_link(data: String)->String{
     }
 }
 
+
+pub fn linkify(data: &str)->String{
+    // let d = data.replace(")
+    // println!("{data}");
+    if data.starts_with("<http") {
+        let d = data.replace("<", "").replace(">", "");
+      return format!("<a href=\"{d}\">{}</a>", escape_html(data.to_string()))
+    }
+    escape_html(data.to_string())
+}
+
 pub fn verify_valid(uri: &String) ->bool{
     Url::parse(&uri).is_ok()
 }
