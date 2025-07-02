@@ -1,5 +1,67 @@
 use crate::utils::escape_html;
 
+pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {
+  let mut all_cards = String::new();
+
+  for (index, (class, count)) in class_counts.iter().enumerate() {
+      all_cards += &format!(
+          r#"<div class="col-md-4 mb-3 card-entry" data-index="{}" style="display: none;">{}</div>"#,
+          index,
+          class_card(class, *count)
+      );
+  }
+
+  let total_cards = class_counts.len();
+
+  format!(
+      r#"<!DOCTYPE html>
+<html data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>KG Explorer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="text-center">
+  <div class="container py-5">
+      <h1 class="mb-4">{} KG Explorer</h1>
+      <div class="d-grid gap-3 col-6 mx-auto mb-4">
+          <a class="btn btn-primary btn-lg" href="/query">Go to Query Page</a>
+      </div>
+      <h3>Explore entities by class</h3>
+      <div class="row" id="card-container">
+          {}
+      </div>
+      <button id="load-more-btn" class="btn btn-secondary mt-4">Load More</button>
+  </div>
+  <script>
+      let shown = 0;
+      const pageSize = 9;
+      const total = {};
+      const showNext = () => {{
+          for (let i = shown; i < Math.min(shown + pageSize, total); i++) {{
+              document.querySelector('[data-index="' + i + '"]').style.display = 'block';
+          }}
+          shown += pageSize;
+          if (shown >= total) {{
+              document.getElementById('load-more-btn').style.display = 'none';
+          }}
+      }};
+      document.addEventListener('DOMContentLoaded', () => {{
+          document.getElementById('load-more-btn').addEventListener('click', showNext);
+          showNext();
+      }});
+  </script>
+</body>
+</html>
+"#,
+      dataset_name,
+      all_cards,
+      total_cards
+  )
+}
+
+
+
 pub(crate) fn explore_page(data:&str, navigation:&str)->String{
 
     return format!(
@@ -176,9 +238,6 @@ pub(crate) fn query_page(nb_results:usize, table_rows_js_array:&str, table_heade
 "#)
 
 }
-
-
-
 pub(crate) fn query_error_page(err: &str)->String{
   format!(r#"
   <!DOCTYPE html>
@@ -246,7 +305,6 @@ pub(crate) fn query_error_page(err: &str)->String{
   </body>
   </html>"#)
 }
-
 pub(crate) fn entity_page(uri:&str, name:&str, description:&str, otype:&str, image:&str, table_1:&str, table_2: &str) ->String{
     format!(r#"<html data-bs-theme="dark">
         <head>  
@@ -302,6 +360,7 @@ pub(crate) fn entity_page(uri:&str, name:&str, description:&str, otype:&str, ima
 , escape_html(uri.to_string())
     )
 }
+
 pub(crate) fn object_card(name:&str, description:&str, image: &str, id:&str)->String{
     format!(
         r#"
@@ -320,4 +379,20 @@ pub(crate) fn object_card(name:&str, description:&str, image: &str, id:&str)->St
         </div>"#,
         image, name, id, name, description
     )
+}
+
+pub(crate) fn class_card(name:&str, count: u32)->String{
+  let entity_name = name.split("/").last().unwrap_or_default().replace(">", "");
+  format!(
+      r#"
+
+          <div class="card h-100" style="cursor: pointer;" >
+              <div class="card-body">
+                  <a href="explore?id={name}">
+                  <h5 class="card-title">{entity_name}</h5></a>
+                  <p class="card-text">{count} Entities</p>
+              </div>
+          </div>
+      "#,
+  )
 }

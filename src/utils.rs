@@ -89,7 +89,7 @@ pub fn to_link(data: String) -> String{
 
 pub fn schema_link(data: String)->String{
     if data.starts_with("&lt;http://schema.org/") && data.ends_with("&gt;") {
-        let link = data.replace("&lt;http://schema.org/", "/explore?id=").replace("&gt;", "");
+        let link = data.replace("&lt;", "/explore?id=<").replace("&gt;", ">");
         format!("<a href=\"{}\">{}</a>", link, data)
     }else {
     data

@@ -5,7 +5,7 @@ use std::thread;
 
 use crate::store::KG;
 use crate::utils::{escape_html, schema_link, to_link};
-use crate::web_ui::html_templates::{self, entity_page, query_error_page, query_page};
+use crate::web_ui::html_templates::{self, entity_page, index_page, query_error_page, query_page};
 use crate::store::StoreError;
 enum Page {
     Index,
@@ -132,30 +132,38 @@ impl WebServer {
     }
 
     fn generate_index(&self) -> String {
-      format!(
-          r#"<!DOCTYPE html>
-  <html data-bs-theme="dark">
-  <head>
-      <meta charset="UTF-8">
-      <title>KG Explorer</title>
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="text-center">
-      <div class="container py-5">
-          <h1 class="mb-4">{} KG Explorer</h1>
-          <div class="d-grid gap-3 col-6 mx-auto">
-              <a class="btn btn-primary btn-lg" href="/query">Go to Query Page</a>
-              <a class="btn btn-success btn-lg" href="/explore?id={}">Explore the Main Entity</a>
-          </div>
-      </div>
-  </body>
-  </html>"#,
-          self.dataset.dataset,self.dataset.dataset,
-      )
-  }
+        let q = r#"SELECT ?t (COUNT(?s) AS ?count)
+    WHERE {
+      ?s a ?t .
+    }
+    GROUP BY ?t
+    ORDER BY DESC(?count)
+    "#;
+    
+        let mut class_counts = vec![];
+    
+        let res = self.dataset.query(q);
+        match res {
+            Ok(result) => {
+                for r in result {
+                    let class = r.get("t").unwrap().to_string();
+                    let cnt = match r.get("count").unwrap() {
+                        oxigraph::model::Term::Literal(literal) => literal.value().parse::<u32>().unwrap(),
+                        _ => 0,
+                    };
+                    class_counts.push((class, cnt));
+                }
+            }
+            Err(_) => panic!("SPARQL query failed"),
+        }
+    
+        index_page(&self.dataset.dataset, &class_counts)
+    }
+    
   
     fn generate_explore(&self, id: &str, page_num: u32) -> String {
-        let objs = self.dataset.get_objects(&format!("<http://schema.org/{}>", id), 50, (page_num-1)*50);
+        let objs = self.dataset.get_objects(
+            &id.replace("%3C", "<").replace("%3E", ">"), 50, (page_num-1)*50);
         let mut page = String::new();
         
         for o in objs{

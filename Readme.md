@@ -12,7 +12,7 @@ Rust KG Explorer provides a lightweight web UI to explore and query a knowledge 
 - Cargo
 - A valid dataset name (for Web Data Commons mode) or a local RDF file (for file mode)
 
-**Datasets:** The datasets are pulled from Web Data Commons Entity Specific Datasets.
+**Datasets:** The datasets are pulled from Web Data Commons Class Specific Datasets.
 
 ## How to Use
 
