@@ -11,7 +11,7 @@ use std::vec;
 use std::path::Path;
 use oxigraph::model::{NamedNode, Term};
 use oxigraph::store::Store;
-use oxigraph::sparql::{QueryResults, QuerySolution};
+use oxigraph::sparql::{EvaluationError, QueryResults, QuerySolution};
 use oxigraph::io::{RdfParser, RdfFormat};
 use item::Item;
 
@@ -48,7 +48,7 @@ pub enum DownloadError{
 
 
 #[derive(Error, Debug)]
-pub enum LoadFileError{
+pub enum LoadError{
     #[error("Invalid path {0} provided!")]
     InvalidPath(String),
     #[error("Unsupported format {0} provided!")]
@@ -63,12 +63,21 @@ pub enum LoadFileError{
     OpenPartFile(String, std::io::Error),
     #[error("Failed to load store file due to {0}!")]
     LoadStoreFile(oxigraph::store::LoaderError),
+    #[error("Failed to load NTriples due to {0}")]
+    LoadNTriples(oxigraph::store::LoaderError),
 }
 
 
+#[derive(Error, Debug)]
 pub enum StoreError {
+    #[error("Failed to evaluate solution due to {0}")]
     EvaluationError(String),
-    UnsupportedError
+    #[error("Unsupported")]
+    UnsupportedError,
+    #[error("Failed to extract solution due to {0}")]
+    SolutionExtraction(EvaluationError),
+    #[error("Store is not initialized!")]
+    Uninitialized,
 }
 
 pub struct KG{
@@ -178,25 +187,25 @@ impl KG{
 
 
 
-    fn load_file(&mut self, file_path:&str) -> Result<(), LoadFileError>{
+    fn load_file(&mut self, file_path:&str) -> Result<(), LoadError>{
         let filename = match file_path.split("/").last(){
             Some(f) => f,
-            None => {return Err(LoadFileError::InvalidPath(file_path.to_string()))},
+            None => {return Err(LoadError::InvalidPath(file_path.to_string()))},
         };
         let file_format = match filename.split(".").last(){
             Some(f) => match f {
                 "ttl" => RdfFormat::Turtle,
                 "nt" => RdfFormat::NTriples,
                 "nq" => RdfFormat::NQuads,
-                _ =>  {return Err(LoadFileError::UnsupportedFormat(f.to_string()))}
+                _ =>  {return Err(LoadError::UnsupportedFormat(f.to_string()))}
             },
-            None => {return Err(LoadFileError::NoFormatProvided)}
+            None => {return Err(LoadError::NoFormatProvided)}
         };
-        let store = Store::open(format!("./data/{}.db", filename)).map_err(|e| LoadFileError::LoadDatabase(e))?;
-        let is_empty = store.is_empty().map_err(|e|LoadFileError::EmptyCheckAction(e))?;
+        let store = Store::open(format!("./data/{}.db", filename)).map_err(|e| LoadError::LoadDatabase(e))?;
+        let is_empty = store.is_empty().map_err(|e|LoadError::EmptyCheckAction(e))?;
         if is_empty {
             let ignored_lines_count = Arc::new(AtomicUsize::new(0));
-            let reader = File::open(file_path).map_err(|e| LoadFileError::OpenPartFile(file_path.to_string(), e))?;
+            let reader = File::open(file_path).map_err(|e| LoadError::OpenPartFile(file_path.to_string(), e))?;
             let parser = RdfParser::from_format(file_format);
             let count_clone = Arc::clone(&ignored_lines_count);
 
@@ -207,7 +216,7 @@ impl KG{
                     Ok(())
                 })
                 .load_from_reader(parser, reader)
-                .map_err(|e| LoadFileError::LoadStoreFile(e))
+                .map_err(|e| LoadError::LoadStoreFile(e))?;
 
         
             let final_count = ignored_lines_count.load(Ordering::Relaxed);
@@ -218,17 +227,17 @@ impl KG{
         self.store = Some(store);
         Ok(())
     }
-    fn load(&mut self) {
+    fn load(&mut self) -> Result<(), LoadError> {
         let now = Instant::now();
         // Load the oxigraph database
-        let store = Store::open(format!("./data/{}.db", self.dataset.to_lowercase())).expect("Failed to load database");
-        let is_empty = store.is_empty().expect("Failed to check if store is empty");
+        let store = Store::open(format!("./data/{}.db", self.dataset.to_lowercase())).map_err(|e| LoadError::LoadDatabase(e))?;
+        let is_empty = store.is_empty().map_err(|e|LoadError::EmptyCheckAction(e))?;
         if is_empty {
             let ignored_lines_count = Arc::new(AtomicUsize::new(0));
             // Load the graph from the nt files
             for i in 0..self.nb_parts {
                 let part_path = format!("./data/{}/part_{}.nt", self.dataset, i);
-                let reader = File::open(&part_path).expect("Failed to open part file");
+                let reader = File::open(&part_path).map_err(|e| LoadError::OpenPartFile(part_path.clone(), e))?;
                 let parser = RdfParser::from_format(RdfFormat::NTriples);
                 let count_clone = Arc::clone(&ignored_lines_count);
 
@@ -239,7 +248,7 @@ impl KG{
                         Ok(())
                     })
                     .load_from_reader(parser, reader)
-                    .expect("Failed to load NTriples");
+                    .map_err(|e| LoadError::LoadNTriples(e))?;
 
             }
             let final_count = ignored_lines_count.load(Ordering::Relaxed);
@@ -248,6 +257,7 @@ impl KG{
             println!("Graph loaded");
         }
         self.store = Some(store);
+        OK(())
     }
     
     pub fn get_objects(&self, object_type: &str, limit: u32, offset: u32) -> Vec<oxigraph::model::Term>{
@@ -366,7 +376,7 @@ impl KG{
                             Ok(solution) =>{
                                 result.push(solution);
                             } ,
-                            Err(_) => panic!("Some error accured with the request"),
+                            Err(e) => {return Err(StoreError::SolutionExtraction(e))},
                         }
                     }
                     Ok(result)
@@ -375,7 +385,7 @@ impl KG{
                 Err(e) =>Err( StoreError::EvaluationError(e.to_string()))
             }
         } else {
-            panic!("Store is not initialized");
+            return Err(StoreError::Uninitialized)
         }
     }
     
@@ -396,16 +406,16 @@ impl KG{
           }}
         }} 
     "#, object);
-    let images = self.query(&query_image).unwrap_or_default();
-    let mut imgs = vec![];
-    for img in images{
-        let img_path = extract_literal(img.get("img")).unwrap_or("".to_string());
-        if verify_valid(&img_path){
-            imgs.push(img_path);
+        let images = self.query(&query_image).unwrap_or_default();
+        let mut imgs = vec![];
+        for img in images{
+            let img_path = extract_literal(img.get("img")).unwrap_or("".to_string());
+            if verify_valid(&img_path){
+                imgs.push(img_path);
+            }
+
         }
-        
-    }
-    imgs
+        imgs
     }
 
 }
