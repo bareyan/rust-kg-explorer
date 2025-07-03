@@ -56,15 +56,33 @@
               </div>
             </div>
             <input type="hidden" id="modeInput" name="mode" value="query" />
-            <div class="mb-3">
+            <div
+              class="mb-3"
+              style="position: relative; display: inline-block; width: 100%"
+            >
               <textarea
                 class="form-control"
                 id="sparqlQuery"
                 name="query"
                 rows="10"
                 placeholder="WRITE YOUR SPARQL QUERY HERE..."
-              ></textarea>
+              >
+              </textarea
+              ><a
+                id="ai_helper"
+                class="btn btn-primary"
+                style="
+                  position: absolute;
+                  right: 10px;
+                  bottom: 10px;
+                  padding: 0.25rem 0.5rem;
+                  font-size: 0.8rem;
+                "
+              >
+                AI Helper
+              </a>
             </div>
+
             <div class="text-end">
               <button type="submit" class="btn btn-primary">Execute</button>
             </div>

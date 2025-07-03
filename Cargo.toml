@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 askama = "0.14.0"
 clap = {version="4.5.40", features = ["derive"] }
+dotenv = "0.15.0"
 flate2 = "1.1.2"
 oxigraph = "0.4.11"
 oxrdfio = "0.1.8"

@@ -4,6 +4,7 @@ mod utils;
 mod item;
 mod web_ui;
 
+use dotenv::dotenv;
 use clap::Parser;
 use web_ui::server::WebServer;
 
@@ -25,10 +26,13 @@ struct Args {
     /// Number of parts (default = 1)
     #[arg(long, default_value_t = 1)]
     nb_parts: u32,
+
+
 }
 
 
 fn main() {
+    dotenv().ok();
    let args = Args::parse();
     if args.wdc {
         let kg = KG::new(&args.dataset, args.nb_parts);
@@ -41,5 +45,4 @@ fn main() {
         w.serve();
         
     }
-
 }

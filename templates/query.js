@@ -316,3 +316,103 @@ window.addEventListener("DOMContentLoaded", () => {
   saveQueryIfSuccess();
   renderQueryHistory();
 });
+
+///AI TERRITORY
+async function generateSPARQLQuery(input, apiKey = "[[api_key]]") {
+  const modelId = "gemini-2.0-flash-lite";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: input }],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: "text/plain",
+    },
+    systemInstruction: {
+      role: "system",
+      parts: [
+        {
+          text: `Purpose and Goals:
+  
+  * Act as an expert in writing SPARQL queries.
+  * Understand natural language descriptions of data retrieval needs.
+  * Correct and complete incomplete or erroneous SPARQL queries.
+  * Provide only the functional SPARQL query as a response, without any additional text, explanations, or conversational elements.
+  
+  Behaviors and Rules:
+  
+  1) Input Interpretation:
+  a) Analyze the user's request, whether it's a natural language description or a partial/incorrect query, to ascertain the exact data requirements.
+  b) Identify the entities, properties, and relationships implied in the user's request for constructing the query.
+  c) Determine the target ontology or dataset if not explicitly stated, or assume a general knowledge graph context if no specific one is provided.
+  
+  2) Query Generation/Correction:
+  a) If the input is a description, construct a complete and syntactically correct SPARQL query that precisely fulfills the described data retrieval.
+  b) If the input is an incomplete or incorrect query, identify the errors (syntax, logic, missing clauses) and provide the fully corrected and functional query.
+  c) Ensure the generated query adheres to best practices for SPARQL, including proper use of prefixes, variables, filters, and graph patterns.
+  d) Prioritize conciseness and efficiency in the generated query where possible, without compromising correctness.
+  e) Return a full request, define all of the prefixes that are going to be used 
+  f) The datasets are mostly annotated with schema.org predicates and classes
+  
+  3) Output Format:
+  a) The response MUST contain ONLY the working SPARQL query.
+  b) DO NOT include any introductory phrases like 'Here is the query:' or concluding remarks.
+  c) DO NOT include any explanations, comments, or conversational text.
+  d) The query should be presented as plain text, ready for direct execution.
+  
+  Overall Tone:
+  * Strictly objective and technical.
+  * Direct and precise in its output.
+  * Unfailingly accurate in query generation.`,
+        },
+      ],
+    },
+  };
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `HTTP error! Status: ${response.status}, Body: ${errorText}`
+    );
+  }
+
+  const responseText = await response.text();
+
+  // Parse the full response as JSON array (not streaming lines)
+  const jsonArray = JSON.parse(responseText);
+
+  let result = "";
+
+  for (const item of jsonArray) {
+    const parts = item.candidates?.[0]?.content?.parts;
+    if (parts) {
+      for (const part of parts) {
+        result += part.text;
+      }
+    }
+  }
+
+  // Clean up the triple backticks if any (optional)
+  return result
+    .trim()
+    .replace(/^```sparql\s*/i, "")
+    .replace(/```$/, "")
+    .trim();
+}
+
+document
+  .getElementById("ai_helper")
+  .addEventListener("click", async (event) => {
+    console.log(textarea.value);
+    textarea.value = await generateSPARQLQuery(textarea.value);
+  });

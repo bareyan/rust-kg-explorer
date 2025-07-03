@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap};
+// use std::fs;
 
 pub struct Template<'a> {
     text: &'a str,

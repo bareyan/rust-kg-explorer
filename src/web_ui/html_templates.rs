@@ -1,5 +1,7 @@
-use crate::{named_args, web_ui::templetization::Template};
+use std::env;
 
+use crate::{named_args, web_ui::templetization::{Template}};
+// use crate::web_ui::templetization::include_str;
 
 pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {
   let mut all_cards = String::new();
@@ -36,13 +38,20 @@ pub(crate) fn explore_page(data:&str, navigation:&str)->String{
 }
 
 pub(crate) fn query_page(nb_results: usize, table_rows_js_array: &str, table_headers_js_array: &str, message: &str) -> String {
+
+  // let htmlcode= &include_str("templates/query.html");
   let html_template = Template::new(include_str!("../../templates/query.html"), &["message", "nb_results", "js"]);
 
-  let js_template = Template::new(include_str!("../../templates/query.js"),  &["table_rows_js_array", "table_headers_js_array"]);
+
+  // let jscode = &include_str("templates/query.js");
+  let js_template = Template::new(include_str!("../../templates/query.js"),  &["table_rows_js_array", "table_headers_js_array", "api_key"]);
+
+  let api_key = env::var("API_KEY").unwrap_or("YOUR GOOGLE AI API KEY".to_string());
 
   let js = &js_template.render(named_args!(
     table_headers_js_array = table_headers_js_array,
-    table_rows_js_array = table_rows_js_array
+    table_rows_js_array = table_rows_js_array,
+    api_key = &api_key
   ));
 
   let nb_results  = &nb_results.to_string();
