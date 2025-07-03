@@ -248,8 +248,8 @@ textarea.addEventListener("keydown", function(e) {{
     e.preventDefault();
     const start = this.selectionStart;
     const end = this.selectionEnd;
-    this.value = this.value.substring(0, start) + "\\t" + this.value.substring(end);
-    this.selectionStart = this.selectionEnd = start + 1;
+    this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 4;
   }}
 }});
 
@@ -277,7 +277,6 @@ document.getElementById("queryForm").addEventListener("submit", (e) => {{
 
 const STORAGE_KEY = "sparql_query_history";
 
-// Save current query if success alert present
 function saveQueryIfSuccess() {{
   const successAlert = document.querySelector(".alert-success");
   if (!successAlert) return;
@@ -287,17 +286,14 @@ function saveQueryIfSuccess() {{
 
   let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 
-  // Remove duplicate if exists
-  history = history.filter(item => item.query !== currentQuery);
 
-  history.unshift({{ query: currentQuery, timestamp: Date.now() }});
+  history.unshift({{ query: modeInput.value[0] + currentQuery, timestamp: Date.now() }});
 
-  if (history.length > 50) history = history.slice(0, 50);
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
 }}
 
-// Render the sidebar query history list
+
 function renderQueryHistory() {{
   const container = document.getElementById("queryHistoryList");
   let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -313,7 +309,7 @@ function renderQueryHistory() {{
     const div = document.createElement("div");
     div.className = "mb-3 border rounded p-2 bg-grey";
 
-    const preview = item.query.replace(/\\s+/g, " ").replace("<", "&lt;").replace(">", "&gt;");
+    const preview = item.query.replace(/\\s+/g, " ").replace("<", "&lt;").replace(">", "&gt;").substring(1);
     const date = new Date(item.timestamp);
     const dateString = date.toLocaleString();
 
@@ -328,8 +324,14 @@ function renderQueryHistory() {{
 
     div.querySelector(".btn-run").addEventListener("click", () => {{
       const baseUrl = window.location.origin + window.location.pathname;
-      const encodedQuery = encodeURIComponent(item.query);
-      const encodedMode = encodeURIComponent(modeInput.value);
+      const encodedQuery = encodeURIComponent(item.query.substring(1));
+      let encodedMode = encodeURIComponent(modeInput.value);
+      if(item.query[0]==='q'){{
+        encodedMode="query";
+      }}
+      else{{
+        encodedMode="update"
+      }}
       window.location.href = `${{baseUrl}}?query=${{encodedQuery}}&mode=${{encodedMode}}`;
     }});
 
