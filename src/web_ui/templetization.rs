@@ -43,6 +43,6 @@ macro_rules! named_args {
 
 
 
-pub fn include_str(path: &str)->String{
-    fs::read_to_string(path).unwrap()
-}
+// pub fn include_str(path: &str)->String{
+//     fs::read_to_string(path).unwrap()
+// }

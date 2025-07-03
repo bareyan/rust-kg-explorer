@@ -1,4 +1,4 @@
-use crate::{named_args, web_ui::templetization::Template, web_ui::templetization::include_str};
+use crate::{named_args, web_ui::templetization::Template};
 
 
 pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {

@@ -199,7 +199,7 @@ navigation += "</div>";
         let mut table_data = vec![];
         let mut headers = vec![];
         let mut message = "Query successfully executed".to_string();
-        let mut messageType = "success";
+        let mut message_type = "success";
 
         if !q.is_empty() {
             match mode {
@@ -234,11 +234,11 @@ navigation += "</div>";
                         }
                         Err(StoreError::EvaluationError (ee)) =>{
                             message  = ee;
-                            messageType = "danger";
+                            message_type = "danger";
                         },
                         Err(StoreError::UnsupportedError) => {
                             message = "The query is not yet supported".to_string();
-                            messageType = "danger";
+                            message_type = "danger";
 
                         }
                     }
@@ -249,7 +249,7 @@ navigation += "</div>";
                         Ok(()) => (),
                         Err(StoreError::EvaluationError(ee)) => {
                             message=  ee;
-                            messageType = "danger";
+                            message_type = "danger";
                         }
                         _ => ()
                     }
@@ -275,8 +275,8 @@ navigation += "</div>";
             .map(|h| format!(r#""{}""#, h))
             .collect::<Vec<_>>()
             .join(",");
-        let message_box = if(q.is_empty()) {""} else {
-            &format!("<div class=\"alert alert-{}\" role=\"alert\"> {} </div>", messageType, message)
+        let message_box = if q.is_empty()  {""} else {
+            &format!("<div class=\"alert alert-{}\" role=\"alert\"> {} </div>", message_type, message)
         };
         query_page(result_rows, &table_rows_js_array, &table_headers_js_array,message_box )
     }
