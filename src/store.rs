@@ -138,6 +138,10 @@ impl KG{
                 "ttl" => RdfFormat::Turtle,
                 "nt" => RdfFormat::NTriples,
                 "nq" => RdfFormat::NQuads,
+                "db" => {
+                    self.store = Some(Store::open(file_path).expect("Failed to load from db"));
+                    return
+                }
                 _ =>  panic!("Format not supported")
             },
             None => panic!("Provide a file with the following extentions: .ttl, .nt, .nq"),
@@ -320,7 +324,7 @@ impl KG{
                     }
                     Ok(result)
                 },
-                Ok(_) => Err(StoreError::EvaluationError("It is ok, not supported".to_string())),
+                Ok(_) => Err(StoreError::UnsupportedError),
                 Err(e) =>Err( StoreError::EvaluationError(e.to_string()))
             }
         } else {
