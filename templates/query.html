@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SPARQL Query Interface</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      td {
+        max-width: 300px;
+        overflow-x: auto;
+        word-break: break-word;
+      }
+      /* Sidebar styles */
+      #sidebar {
+        width: max(30vw, 250px);
+        padding: 10px;
+        position: fixed;
+        right: 0px;
+        height: 100vh;
+        overflow-y: auto;
+        border-right: 1px solid #ccc;
+        padding-right: 1rem;
+      }
+      #main {
+        margin-right: max(30vw, 250px);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="d-flex">
+      <div class="flex-grow-1 px-4" id="main">
+        <div class="container py-5">
+          <a href="/" class="text-decoration-none"
+            ><h1 class="mb-4 text-center">SPARQL Query Engine</h1></a
+          >
+
+          <form method="GET" id="queryForm">
+            <div class="mb-3 d-flex align-items-center justify-content-between">
+              <label for="sparqlQuery" class="form-label mb-0"
+                >Enter SPARQL Query:</label
+              >
+              <div class="form-check form-switch">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  id="modeSwitch"
+                />
+                <label class="form-check-label" for="modeSwitch" id="modeLabel"
+                  >Query Mode</label
+                >
+              </div>
+            </div>
+            <input type="hidden" id="modeInput" name="mode" value="query" />
+            <div class="mb-3">
+              <textarea
+                class="form-control"
+                id="sparqlQuery"
+                name="query"
+                rows="10"
+                placeholder="WRITE YOUR SPARQL QUERY HERE..."
+              ></textarea>
+            </div>
+            <div class="text-end">
+              <button type="submit" class="btn btn-primary">Execute</button>
+            </div>
+          </form>
+          [[message]]
+          <div class="mt-4" id="results">
+            <p>Found [[nb_results]] rows</p>
+            <h5>Results:</h5>
+            <div class="table-responsive">
+              <table
+                class="table table-bordered table-hover bg-white"
+                id="resultsTable"
+              >
+                <thead class="table-light">
+                  <tr id="tableHeader"></tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+              </table>
+            </div>
+            <div class="d-flex justify-content-between mt-3">
+              <button class="btn btn-secondary" id="prevBtn">Previous</button>
+              <span id="pageInfo" class="align-self-center"></span>
+              <button class="btn btn-secondary" id="nextBtn">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="sidebar">
+        <div class="d-flex justify-content-between" style="margin-bottom: 30px">
+          <h5>Previous Queries</h5>
+          <div class="flex">
+            <a class="btn btn-secondary" id="download"> Download </a>
+            <input
+              type="file"
+              id="importQueriesInput"
+              accept=".sparql"
+              style="display: none"
+            />
+            <a id="importQueriesBtn" class="btn btn-primary">
+              Import Queries
+            </a>
+          </div>
+        </div>
+        <div id="queryHistoryList"></div>
+      </div>
+    </div>
+
+    <script>
+      [[js]];
+    </script>
+  </body>
+</html>
