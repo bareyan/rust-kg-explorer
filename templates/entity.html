@@ -9,6 +9,68 @@
       integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
       crossorigin="anonymous"
     />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <style type="text/css">
+      #mygraph {
+        width: 100%;
+        height: 85vh;
+        border: 1px solid #495057;
+        border-radius: 8px;
+        background-color: #101010;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .node-html-content {
+        color: #f8f9fa;
+        font-family: sans-serif;
+        font-size: 14px;
+        padding: 15px;
+        background-color: #343a40;
+        border: 1px solid #6c757d;
+        border-radius: 6px;
+
+        box-sizing: border-box;
+        overflow: auto;
+      }
+      .node-html-content a {
+        color: #8cb4ff;
+        font-weight: bold;
+        font-size: 16px;
+        text-decoration: none;
+      }
+      .node-html-content p {
+        margin-bottom: 0;
+      }
+
+      .node-html-content a:hover {
+        text-decoration: underline;
+      }
+      .node-html-content .separator {
+        border-top: 1px solid #6c757d;
+        margin: 10px 0;
+      }
+      .node-html-content .attributes {
+        white-space: pre-wrap;
+        word-break: break-word;
+        text-align: left;
+      }
+
+      .edge-label-box {
+        fill: #e0f2fe;
+      }
+
+      .edge-label-text {
+        fill: #0c4a6e;
+        font-family: sans-serif;
+        font-size: 16px;
+        font-weight: 500;
+
+        text-anchor: middle;
+        alignment-baseline: middle;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body>
     <div class="container py-5">
@@ -56,7 +118,20 @@
           </tbody>
         </table>
       </div>
+      <div id="mygraph"></div>
     </div>
+    <script>
+      [[js]];
+    </script>
+    <script>
+      const graphData = {
+        nodes: [[[nodes]]],
+        links: [[[cons]]],
+      };
+
+      renderD3Graph("mygraph", graphData);
+    </script>
+
     <script
       src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"
       integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q"
