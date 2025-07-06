@@ -32,7 +32,7 @@ function renderTable() {
       if (cell.startsWith("<") && cell.endsWith(">")) {
         const uri = cell.substring(1, cell.length - 1);
         const a = document.createElement("a");
-        a.href = `/entity/<${uri}>`;
+        a.href = `/entity/<${uri.replaceAll("#", "%23")}>`;
         a.textContent = `<${uri}>`;
         a.target = "_blank";
         td.appendChild(a);
@@ -49,6 +49,25 @@ function renderTable() {
   )}`;
 }
 
+document.getElementById("download-csv").addEventListener("click", () => {
+  const downloadData = [
+    tableHeaders.join(";"),
+    ...tableData.map((p) => p.join(";")),
+  ];
+
+  const blob = new Blob([downloadData.join("\n")], {
+    type: "text/csv",
+  });
+
+  const durl = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = durl;
+  a.download = "result.csv";
+  a.click();
+
+  URL.revokeObjectURL(durl);
+});
 //RESULTS NAVIGATION
 document.getElementById("prevBtn").addEventListener("click", () => {
   if (currentPage > 0) {
@@ -77,7 +96,9 @@ textarea.addEventListener("keydown", function (e) {
 
 document.getElementById("queryForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  const encodedQuery = encodeURIComponent(textarea.value);
+  const encodedQuery = encodeURIComponent(
+    textarea.value.replaceAll("#", "%23")
+  );
   const encodedMode = encodeURIComponent(modeInput.value);
   const baseUrl = window.location.origin + window.location.pathname;
   window.location.href = `${baseUrl}?query=${encodedQuery}&mode=${encodedMode}`;

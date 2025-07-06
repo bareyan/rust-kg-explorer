@@ -83,12 +83,12 @@ pub fn escape_html(data: String) -> String {
 }
 
 pub fn escape_js(data: String) -> String {
-    data.replace("'", "\\'").replace("\"", "\\\"")
+    data.replace("'", "\\'").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")
 }
 
 pub fn to_link(data: String) -> String {
     if data.starts_with("&lt;") && data.ends_with("&gt;") {
-        let link = data.replace("&lt;", "/entity/<").replace("&gt;", ">");
+        let link = data.replace("&lt;", "/entity/<").replace("&gt;", ">").replace("#", "%23");
         format!("<a href=\"{}\">{}</a>", link, data)
     } else {
         data
@@ -118,7 +118,7 @@ pub fn verify_valid(uri: &String) -> bool {
     Url::parse(&uri).is_ok()
 }
 
-pub fn format_json(id: u32, entity: String, props: Vec<QuerySolution>) -> String {
+pub fn format_json(entity: String, props: Vec<QuerySolution>) -> String {
     let mut name = entity.clone();
     let mut image = String::new();
     let mut inside = String::new();
@@ -126,12 +126,14 @@ pub fn format_json(id: u32, entity: String, props: Vec<QuerySolution>) -> String
         if connection.get("predicate").unwrap().to_string() == "<http://schema.org/name>" {
             match connection.get("object").unwrap() {
                 Literal(literal) => {
-                    name = literal.value().to_string();
+                    name = escape_js(literal.value().to_string());
                 }
                 _ => (),
             }
         }
-        if connection.get("predicate").unwrap().to_string() == "<http://schema.org/image>" {
+        let p = connection.get("predicate").unwrap().to_string();
+
+        if p == "<http://schema.org/image>" || p == "<http://schema.org/photo>" {
             match connection.get("object").unwrap() {
                 Literal(literal) => {
                     image = literal.value().to_string();
@@ -144,14 +146,16 @@ pub fn format_json(id: u32, entity: String, props: Vec<QuerySolution>) -> String
         }
         inside += &format!(
             "[\"{}\",  \'{}\'],",
-            escape_html(
-                connection
-                    .get("predicate")
-                    .unwrap()
-                    .to_string()
-                    .replace("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "type")
-                    .replace("<http://schema.org/", ":")
-                    .replace(">", "")
+            escape_js(
+                escape_html(
+                    connection
+                        .get("predicate")
+                        .unwrap()
+                        .to_string()
+                        .replace("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "type")
+                        .replace("<http://schema.org/", ":")
+                        .replace(">", "")
+                )
             ),
             escape_js(escape_html(connection.get("object").unwrap().to_string()))
         );
@@ -161,7 +165,7 @@ pub fn format_json(id: u32, entity: String, props: Vec<QuerySolution>) -> String
     format!(
         r#"
         {{
-            id: {id},
+            id: "{entity}",
             name: "{name}",
             {imagerow}
             url: "/entity/{entity}",

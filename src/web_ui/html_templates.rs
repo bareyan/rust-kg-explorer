@@ -41,15 +41,12 @@ pub(crate) fn query_page(
     table_headers_js_array: &str,
     message: &str
 ) -> String {
-    // let htmlcode= &include_str("templates/query.html");
-    let html_template = Template::new(
-        include_str!("../../templates/query.html"),
-        &["message", "nb_results", "js"]
-    );
+    let htmlcode = &include_str("templates/query.html");
+    let html_template = Template::new(htmlcode, &["message", "nb_results", "js"]);
 
-    // let jscode = &include_str("templates/query.js");
+    let jscode = &include_str("templates/query.js");
     let js_template = Template::new(
-        include_str!("../../templates/query.js"),
+        jscode,
         &["table_rows_js_array", "table_headers_js_array", "api_key"]
     );
 

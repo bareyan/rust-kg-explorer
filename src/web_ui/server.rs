@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::prelude::*;
 use std::net::{ TcpListener, TcpStream };
 use std::sync::Arc;
@@ -64,7 +65,7 @@ impl WebServer {
             Some((r, q)) => (r, Some(q)),
             None => (full_path, None),
         };
-
+        println!("{}", first_line);
         let (status_line, page) = match route {
             "/" => ("HTTP/1.1 200 OK", Page::Index),
             "/query" => {
@@ -99,7 +100,13 @@ impl WebServer {
                 }
             }
             route if route.starts_with("/entity/") => {
-                let entity_name = &full_path["/entity/".len()..];
+                let fp = percent_encoding
+                    ::percent_decode_str(full_path)
+                    .decode_utf8()
+                    .unwrap()
+                    .to_string();
+                let entity_name = &fp["/entity/".len()..];
+
                 (
                     "HTTP/1.1 200 OK",
                     Page::Entity(entity_name.to_string().replace("%3C", "<").replace("%3E", ">")),
@@ -367,15 +374,19 @@ impl WebServer {
             )
         };
 
-        let mut cur_id = 1;
-        let mut items = vec![(1, entity.to_string())];
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut items = vec![entity.to_string()];
         let mut connections = vec![];
         let mut cons = String::new();
         let mut jsons = String::new();
 
         while items.len() > 0 {
-            let ent = items.get(0).unwrap().1.clone();
-            let ent_id = items.get(0).unwrap().0;
+            let ent = items.get(0).unwrap().clone();
+            if seen.contains(&ent) {
+                items.remove(0);
+                continue;
+            }
+            seen.insert(ent.clone());
             let simple_connections_query = format!(
                 r#"PREFIX schema: <http://schema.org/>
                     SELECT DISTINCT ?predicate ?object
@@ -389,9 +400,8 @@ impl WebServer {
             let simple_connections = self.dataset
                 .query(&simple_connections_query)
                 .unwrap_or_default();
-            let jsonrep = format_json(ent_id, format!("{ent}"), simple_connections);
+            let jsonrep = format_json(format!("{ent}"), simple_connections);
             jsons += &jsonrep;
-            cur_id += 1;
             let complex_connections_query = format!(
                 r#"PREFIX schema: <http://schema.org/>
                     SELECT DISTINCT ?predicate ?object
@@ -405,15 +415,19 @@ impl WebServer {
                 .query(&complex_connections_query)
                 .unwrap_or_default();
             for row in complex_connections {
-                connections.push((ent_id, cur_id, row.get("predicate").unwrap().to_string()));
-                items.push((cur_id, row.get("object").unwrap().to_string()));
-                cur_id += 1;
+                let cur = row.get("object").unwrap().to_string();
+                connections.push((
+                    ent.clone(),
+                    cur.clone(),
+                    row.get("predicate").unwrap().to_string(),
+                ));
+                items.push(cur);
             }
             items.remove(0);
         }
         // println!("{jsons}");
         for (s, t, l) in connections {
-            cons += &format!("{{source: {}, target: {}, label: \"{}\"}},", s, t, l);
+            cons += &format!("{{source: \"{}\", target: \"{}\", label: \"{}\"}},", s, t, l);
         }
         entity_page(
             &linkify(&entity),

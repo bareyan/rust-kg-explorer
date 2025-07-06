@@ -3,7 +3,7 @@
  * @param {string} containerId - The ID of the div where the graph will be rendered.
  * @param {object} graphData - An object containing nodes and links.
  */
-function renderD3Graph(containerId, graphData) {
+function renderD3Graph(containerId, graphData, currentEntity) {
   const container = document.getElementById(containerId);
   if (!container) {
     console.error(`Container with id "${containerId}" not found.`);
@@ -109,7 +109,9 @@ function renderD3Graph(containerId, graphData) {
 
   const htmlContent = foreignObject
     .append("xhtml:div")
-    .attr("class", "node-html-content");
+    .attr("class", (d) =>
+      d.url === currentEntity ? "active node-html-content" : "node-html-content"
+    );
 
   htmlContent
     .append("xhtml:a")

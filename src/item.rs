@@ -14,7 +14,7 @@ impl Item {
         types: Vec<Term>,
         name: Option<String>,
         description: Option<String>,
-        imgs: Vec<String>,
+        imgs: Vec<String>
     ) -> Item {
         Item {
             node,
@@ -38,15 +38,9 @@ impl Item {
     }
 
     pub fn html_rep(&self) -> String {
-        let image = self
-            .images
-            .first()
-            .map(String::as_str)
-            .unwrap_or("")
-            .to_string();
+        let image = self.images.first().map(String::as_str).unwrap_or("").to_string();
         let name = self.name.as_deref().unwrap_or("Unknown").to_string();
-        let description = self
-            .description
+        let description = self.description
             .as_deref()
             .unwrap_or("No description available")
             .to_string();
@@ -58,12 +52,17 @@ impl Item {
             Term::Literal(_) => panic!("A literal cannot be an object"),
             Term::Triple(_) => panic!("Wrong SPARQL request. Tripple as result is not expected"),
         };
-        object_card(&name, &description, &image, id)
+        object_card(&name, &description, &image, &id.replace("#", "%23"))
     }
 }
 impl From<&Item> for String {
     fn from(value: &Item) -> Self {
-        format!("-------------------------\nA Node {},\nhas name: {},\n{}\n-------------------------------", value.node, value.name.clone().unwrap_or("No name available".to_string()), value.description.clone().unwrap_or("No description available".to_string()))
+        format!(
+            "-------------------------\nA Node {},\nhas name: {},\n{}\n-------------------------------",
+            value.node,
+            value.name.clone().unwrap_or("No name available".to_string()),
+            value.description.clone().unwrap_or("No description available".to_string())
+        )
     }
 }
 

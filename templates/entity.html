@@ -33,6 +33,10 @@
         box-sizing: border-box;
         overflow: auto;
       }
+      .active {
+        border: 2px solid #b8a000;
+        background-color: #8f915a;
+      }
       .node-html-content a {
         color: #8cb4ff;
         font-weight: bold;
@@ -129,7 +133,7 @@
         links: [[[cons]]],
       };
 
-      renderD3Graph("mygraph", graphData);
+      renderD3Graph("mygraph", graphData, decodeURI(window.location.pathname));
     </script>
 
     <script
