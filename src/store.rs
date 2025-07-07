@@ -14,7 +14,7 @@ use oxigraph::sparql::{ QueryResults, QuerySolution };
 use oxigraph::io::{ RdfParser, RdfFormat };
 use item::Item;
 
-use crate::utils::{ self, extract_literal, verify_valid };
+use crate::utils::{ self, cleanup, extract_literal, merge_list_items, verify_valid };
 use crate::item;
 
 pub enum StoreError {
@@ -211,6 +211,8 @@ impl KG {
                     })
                     .load_from_reader(parser, reader)
                     .expect("Failed to load NTriples");
+                cleanup(&store);
+                merge_list_items(&store);
             }
             let final_count = ignored_lines_count.load(Ordering::Relaxed);
             println!(
@@ -297,7 +299,11 @@ impl KG {
                     extract_literal(descriptionr.first().unwrap().get("description"))
                 };
 
-                let images = self.get_images(&named_node.to_string());
+                let images = self.get_images(
+                    &named_node.to_string(),
+                    otype.unwrap() ==
+                        &NamedNode::from_str("<http://schema.org/ImageObject>").unwrap().into()
+                );
                 Item::new(
                     named_node.into(),
                     vec![otype.cloned().unwrap()],
@@ -341,7 +347,9 @@ impl KG {
         for tp in typer {
             otypes.push(tp.get("otype").unwrap().clone());
         }
-
+        let is_img = otypes.contains(
+            &NamedNode::from_str("<http://schema.org/ImageObject>").unwrap().into()
+        );
         // let otype = if typer.is_empty() {None} else {typer.iter().next().unwrap().get("otype")};
         let name = if namer.is_empty() {
             None
@@ -357,7 +365,7 @@ impl KG {
         let node = NamedNode::from_str(object).unwrap_or_else(|_|
             panic!("Failed to create object from string! {object}")
         );
-        Item::new(node.into(), otypes, name, description, self.get_images(object))
+        Item::new(node.into(), otypes, name, description, self.get_images(object, is_img))
     }
 
     pub fn query(&self, query: &str) -> Result<Vec<QuerySolution>, StoreError> {
@@ -396,9 +404,19 @@ impl KG {
         }
     }
 
-    pub fn get_images(&self, object: &str) -> Vec<String> {
-        let query_image = format!(
-            r#"
+    pub fn get_images(&self, object: &str, is_img: bool) -> Vec<String> {
+        let query_image = if is_img {
+            format!(
+                r#"
+            SELECT ?img WHERE {{
+        {object} <http://schema.org/url> ?img .
+            }}
+                
+                "#
+            )
+        } else {
+            format!(
+                r#"
         SELECT ?img WHERE {{
           {{
             {0} <http://schema.org/image> ?img .
@@ -414,8 +432,9 @@ impl KG {
           }}
         }} 
     "#,
-            object
-        );
+                object
+            )
+        };
         let images = self.query(&query_image).unwrap_or(vec![]);
         let mut imgs = vec![];
         for img in images {

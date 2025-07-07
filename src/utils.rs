@@ -2,7 +2,8 @@ use std::fs::File;
 use std::io::{ BufWriter, Write };
 use oxigraph::model::{ Term };
 use oxigraph::model::Term::{ NamedNode, Literal };
-use oxigraph::sparql::QuerySolution;
+use oxigraph::sparql::{ QueryResults, QuerySolution };
+use oxigraph::store::Store;
 use regex::{ Match, Regex };
 use url::Url;
 use std::io::{ BufRead, BufReader };
@@ -59,6 +60,249 @@ pub(crate) fn preprocess(nquads_file: &str) {
         let _ = writeln!(writer, "{}", line);
         line.clear();
     }
+}
+
+pub(crate) fn cleanup(store: &Store) {
+    println!("Starting cleanup...");
+    let updates = vec![
+        r#"
+        DELETE {
+            ?s <http://schema.org/url> ?url.
+        }
+        INSERT {
+            ?s <http://schema.org/url> ?newIRI.
+        }
+        WHERE {
+            ?s a <http://schema.org/ImageObject>.
+            ?s <http://schema.org/url> ?url.
+            FILTER(isLiteral(?url))
+            BIND (IRI(STR(?url)) AS ?newIRI)
+        }
+        "#,
+        r#"
+        DELETE {
+            ?sub ?p ?s.
+        }
+        INSERT {
+            ?sub ?p ?url.
+        }
+        WHERE {
+            ?s a <http://schema.org/ImageObject>.
+            ?s <http://schema.org/url> ?url.
+            ?sub ?p ?s.
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s ?p ?o.
+        }
+        INSERT {
+            ?url ?p ?o.
+        }
+        WHERE {
+            ?s a <http://schema.org/ImageObject>.
+            ?s <http://schema.org/url> ?url.
+            ?s ?p ?o.
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s <http://schema.org/url> ?url.
+        }
+        INSERT {
+            ?s <http://schema.org/url> ?newIRI.
+        }
+        WHERE {
+            ?s <http://schema.org/image> ?url.
+            FILTER(isLiteral(?url))
+            BIND (IRI(STR(?url)) AS ?newIRI)
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s <http://schema.org/url> ?url.
+        }
+        INSERT {
+            ?s <http://schema.org/url> ?newIRI.
+        }
+        WHERE {
+            ?s <http://schema.org/photo> ?url.
+            FILTER(isLiteral(?url))
+            BIND (IRI(STR(?url)) AS ?newIRI)
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s <http://schema.org/url> ?url.
+        }
+        INSERT {
+            ?s <http://schema.org/url> ?newIRI.
+        }
+        WHERE {
+            ?s <http://schema.org/logo> ?url.
+            FILTER(isLiteral(?url))
+            BIND (IRI(STR(?url)) AS ?newIRI)
+        }
+        "#,
+        r#"
+        INSERT {
+            ?url a <http://schema.org/ImageObject>.
+            ?url <http://schema.org/url> ?url.
+        }
+        WHERE {
+            ?s <http://schema.org/logo> ?url.
+            FILTER NOT EXISTS {
+                ?url ?p ?o.
+            }
+        }
+        "#,
+        r#"
+        INSERT {
+            ?url a <http://schema.org/ImageObject>.
+            ?url <http://schema.org/url> ?url.
+        }
+        WHERE {
+            ?s <http://schema.org/image> ?url.
+            FILTER NOT EXISTS {
+                ?url ?p ?o.
+            }
+        }
+        "#,
+        r#"
+        INSERT {
+            ?url a <http://schema.org/ImageObject>.
+            ?url <http://schema.org/url> ?url.
+        }
+        WHERE {
+            ?s <http://schema.org/photo> ?url.
+            FILTER NOT EXISTS {
+                ?url ?p ?o.
+            }
+        }
+        "#,
+        r#"
+        PREFIX schema: <http://schema.org/>
+        DELETE {
+            ?sub ?p ?s .
+        }
+        INSERT{
+            ?sub ?p ?url.
+        }
+        WHERE {
+            ?s schema:url ?url .
+            FILTER (strstarts(str(?s), "urn:skolem")) .
+            FILTER NOT EXISTS {
+                ?s schema:url ?url2 .
+                FILTER(?url != ?url2)
+            }
+            ?sub ?p ?s.
+        }
+        "#,
+        r#"
+        PREFIX schema: <http://schema.org/>
+        DELETE {
+            ?s ?p ?o.
+        }
+        INSERT{
+            ?url ?p ?o.
+        }
+        WHERE {
+            ?s schema:url ?url .
+            FILTER (strstarts(str(?s), "urn:skolem")) .
+            FILTER NOT EXISTS {
+                ?s schema:url ?url2 .
+                FILTER(?url != ?url2)
+            }
+            ?s ?p ?o.
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s <http://schema.org/item> ?o.
+        }
+        INSERT {
+            ?s <http://schema.org/item> ?newIRI.
+        }
+        WHERE {
+            ?s <http://schema.org/item> ?o.
+            FILTER(isLiteral(?o))
+            BIND (IRI(STR(?o)) AS ?newIRI)
+        }
+        "#,
+        r#"
+        DELETE {
+            ?s ?p ?o .
+        }
+        WHERE {
+            ?s ?p ?o .
+            FILTER NOT EXISTS {
+                ?s ?p2 ?o2 .
+                FILTER(?p != ?p2 && ?o != ?o2)
+            }
+        }
+        "#
+    ];
+
+    for update in updates {
+        store.update(update);
+    }
+    println!("Data cleaned");
+}
+
+pub(crate) fn merge_list_items(store: &Store) {
+    let query =
+        r#"
+    SELECT ?s1 ?s2 WHERE {
+        ?s1 <http://schema.org/item> ?o.
+        ?s2 <http://schema.org/item> ?o.
+        FILTER(STR(?s1) < STR(?s2))
+    }
+    "#;
+
+    let mut count = 0;
+
+    if let QueryResults::Solutions(results) = store.query(query).unwrap() {
+        for solution in results {
+            let solution = solution.unwrap();
+            let s1 = solution.get("s1").unwrap().to_string();
+            let s2 = solution.get("s2").unwrap().to_string();
+
+            // Transfer triples where s2 is subject
+            let update_subject = format!(
+                r#"
+                DELETE {{ <{s2}> ?p ?o }}
+                INSERT {{ <{s1}> ?p ?o }}
+                WHERE  {{ <{s2}> ?p ?o }}
+            "#
+            );
+            store.update(&update_subject);
+
+            // Transfer triples where s2 is object
+            let update_object = format!(
+                r#"
+                DELETE {{ ?sub ?pred <{s2}> }}
+                INSERT {{ ?sub ?pred <{s1}> }}
+                WHERE  {{ ?sub ?pred <{s2}> }}
+            "#
+            );
+            store.update(&update_object);
+
+            // Add owl:sameAs triple
+            let insert_sameas = format!(
+                r#"
+                INSERT DATA {{ <{s2}> <http://www.w3.org/2002/07/owl#sameAs> <{s1}> }}
+            "#
+            );
+            store.update(&insert_sameas);
+
+            count += 1;
+            if count % 100000 == 0 {
+                println!("{count} merged...");
+            }
+        }
+    }
+
+    println!("Finished merging {count} duplicate entities.");
 }
 
 pub(crate) fn extract_literal(term: Option<&Term>) -> Option<String> {
@@ -122,45 +366,56 @@ pub fn format_json(entity: String, props: Vec<QuerySolution>) -> String {
     let mut name = entity.clone();
     let mut image = String::new();
     let mut inside = String::new();
-    for connection in props {
-        if connection.get("predicate").unwrap().to_string() == "<http://schema.org/name>" {
-            match connection.get("object").unwrap() {
-                Literal(literal) => {
-                    name = escape_js(literal.value().to_string());
-                }
-                _ => (),
-            }
-        }
-        let p = connection.get("predicate").unwrap().to_string();
 
-        if p == "<http://schema.org/image>" || p == "<http://schema.org/photo>" {
-            match connection.get("object").unwrap() {
-                Literal(literal) => {
-                    image = literal.value().to_string();
-                }
-                NamedNode(named) => {
-                    image = named.as_str().replace("<", "").replace(">", "<");
-                }
-                _ => (),
+    let mut is_img = false;
+    for connection in props {
+        let p = connection.get("predicate").unwrap().to_string();
+        let o = connection.get("object").unwrap();
+
+        // Handle special predicates
+        match (p.as_str(), o) {
+            ("<http://schema.org/name>", Literal(lit)) => {
+                name = escape_js(lit.value().to_string());
             }
+            ("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", NamedNode(named)) => {
+                if named.to_string() == "<http://schema.org/ImageObject>" {
+                    println!("yes");
+                    is_img = true;
+                }
+            }
+            (p, o) if
+                image.is_empty() &&
+                [
+                    "<http://schema.org/image>",
+                    "<http://schema.org/photo>",
+                    "<http://schema.org/logo>",
+                ].contains(&p)
+            => {
+                image = match o {
+                    Literal(lit) => lit.value().to_string(),
+                    NamedNode(named) => named.as_str().replace("<", "").replace(">", "<"),
+                    _ => image,
+                };
+            }
+            _ => {}
         }
         inside += &format!(
             "[\"{}\",  \'{}\'],",
             escape_js(
                 escape_html(
-                    connection
-                        .get("predicate")
-                        .unwrap()
-                        .to_string()
+                    p
                         .replace("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "type")
                         .replace("<http://schema.org/", ":")
                         .replace(">", "")
                 )
             ),
-            escape_js(escape_html(connection.get("object").unwrap().to_string()))
+            escape_js(escape_html(o.to_string()))
         );
     }
 
+    if is_img {
+        image = entity.replace("<", "").replace(">", "");
+    }
     let imagerow = if image.is_empty() { image } else { format!("image: \"{}\",", image) };
     format!(
         r#"
