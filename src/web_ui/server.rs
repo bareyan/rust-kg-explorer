@@ -1,18 +1,22 @@
-use std::collections::HashSet;
+use std::collections::{ HashMap, HashSet };
+use std::fs::read_to_string;
 use std::io::prelude::*;
 use std::net::{ TcpListener, TcpStream };
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
 use crate::store::KG;
-use crate::utils::{ escape_html, format_json, linkify, schema_link, to_link };
-use crate::web_ui::html_templates::{ self, entity_page, index_page, query_page };
+use crate::utils::{ escape_html, format_json, linkify, schema_link, to_link, url_decode };
+use crate::web_ui::html_templates::{ self, entity_page, index_page, query_page, routines_page };
 use crate::store::StoreError;
 enum Page {
     Index,
     Explore(String, u32),
-    Query(Option<String>, Option<String>),
+    Query(Option<String>, Option<String>, Option<String>),
     Entity(String),
+    Run(Vec<(bool, String, String)>),
+    Scripts,
     Error,
 }
 
@@ -75,11 +79,15 @@ impl WebServer {
                         "HTTP/1.1 200 OK",
                         Page::Query(
                             Self::extract_query_param(qs, "query"),
-                            Self::extract_query_param(qs, "mode")
+                            Self::extract_query_param(qs, "mode"),
+                            Self::extract_query_param(qs, "secondary")
                         ),
                     )
                 } else {
-                    ("HTTP/1.1 200 OK", Page::Query(Self::extract_query_param("", "query"), None))
+                    (
+                        "HTTP/1.1 200 OK",
+                        Page::Query(Self::extract_query_param("", "query"), None, None),
+                    )
                 }
             }
             "/explore" => {
@@ -113,16 +121,28 @@ impl WebServer {
                 )
             }
             "/entity" => ("HTTP/1.1 400 BAD REQUEST", Page::Entity("dfa".to_owned())),
+            "/routines" => {
+                if let Some(qs) = query_string {
+                    let queries = Self::parse_procedures(
+                        &percent_encoding::percent_decode_str(qs).decode_utf8().unwrap()
+                    );
+                    ("HTTP/1.1 200 OK", Page::Run(queries))
+                } else {
+                    ("HTTP/1.1 200 OK", Page::Scripts)
+                }
+            }
             _ => ("HTTP/1.1 404 NOT FOUND", Page::Error),
         };
 
         let contents: String = match page {
             Page::Index => self.generate_index(),
             Page::Explore(id, page) => self.generate_explore(&id, page),
-            Page::Query(Some(q), Some(mode)) => self.generate_query(&q, &mode),
-            Page::Query(None, _) => self.generate_query("", "query"),
-            Page::Query(Some(q), None) => self.generate_query(&q, "query"),
+            Page::Query(Some(q), Some(mode), sq) => self.generate_query(&q, &mode, sq),
+            Page::Query(None, _, _) => self.generate_query("", "query", None),
+            Page::Query(Some(q), None, _) => self.generate_query(&q, "query", None),
             Page::Entity(uri) => self.generate_entity(&uri),
+            Page::Scripts => self.generate_scripts(),
+            Page::Run(scripts) => self.generate_run_results(scripts),
             Page::Error => self.generate_error(),
         };
 
@@ -214,7 +234,7 @@ impl WebServer {
         html_templates::explore_page(&page, &navigation)
     }
 
-    fn generate_query(&self, q: &str, mode: &str) -> String {
+    fn generate_query(&self, q: &str, mode: &str, sq: Option<String>) -> String {
         let mut table_data = vec![];
         let mut headers = vec![];
         let mut message = "Query successfully executed".to_string();
@@ -277,6 +297,20 @@ impl WebServer {
                         _ => (),
                     }
                 }
+                "advanced" => {
+                    match self.dataset.iterative_update(&sq.unwrap(), q) {
+                        Ok(()) => (),
+                        Err(StoreError::EvaluationError(ee)) => {
+                            message = ee;
+                            message_type = "danger";
+                        }
+                        _ => {
+                            message = "Unknown error".to_string();
+                            message_type = "danger";
+                        }
+                    }
+                }
+
                 _ => (),
             }
         }
@@ -444,5 +478,183 @@ impl WebServer {
 
     fn generate_error(&self) -> String {
         "<html><body><h1>404 - Page Not Found</h1></body></html>".to_string()
+    }
+
+    fn generate_scripts(&self) -> String {
+        routines_page()
+    }
+
+    fn generate_run_results(&self, queries: Vec<(bool, String, String)>) -> String {
+        let initial_count = self.dataset.count_lines();
+        let mut err = false;
+        let mut err_message = String::new();
+        let mut err_index = 0usize;
+        let mut success_scripts = vec![];
+        let mut failed_script = None;
+
+        for (i, (advanced, script_name, query)) in queries.iter().enumerate() {
+            let result = if *advanced {
+                let parts: Vec<&str> = query.split("#\n").collect();
+                if parts.len() != 2 {
+                    self.dataset.update(query)
+                } else {
+                    let (select_query, update_query) = (parts[0], parts[1]);
+                    self.dataset.iterative_update(select_query, update_query)
+                }
+            } else {
+                self.dataset.update(query)
+            };
+            match result {
+                Ok(_) => success_scripts.push(script_name.clone()),
+                Err(StoreError::EvaluationError(ee)) => {
+                    err_message = ee;
+                    err = true;
+                    err_index = i;
+                    failed_script = Some(script_name.clone());
+                    break;
+                }
+                Err(StoreError::UnsupportedError) => {
+                    err = true;
+                    err_index = i;
+                    failed_script = Some(script_name.clone());
+                    break;
+                }
+            }
+        }
+
+        let final_count = self.dataset.count_lines();
+        let diff = (final_count as i64) - (initial_count as i64);
+        let action = if diff >= 0 { "Inserted" } else { "Deleted" };
+        let count = diff.abs();
+        if err {
+            let skipped_scripts = queries
+                .iter()
+                .skip(err_index + 1)
+                .map(|(_, name, _)| format!("<li>{}</li>", name))
+                .collect::<String>();
+
+            let ran_scripts = success_scripts
+                .iter()
+                .map(|name| format!("<li>{}</li>", name))
+                .collect::<String>();
+
+            let failed_name = failed_script.unwrap_or_else(|| "Unknown".to_string());
+
+            format!(
+                r#"
+    <!DOCTYPE html>
+    <html lang="en" data-bs-theme="dark">
+    <head>
+      <meta charset="UTF-8">
+      <title>Error</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="d-flex justify-content-center align-items-center vh-100">
+      <div class="text-center">
+        <h1 class="text-danger mb-4">Something went wrong</h1>
+        <div class="alert alert-danger text-start mx-auto" style="max-width: 500px;">
+          <p><strong>Ran successfully:</strong></p>
+          <ul>{ran_scripts}</ul>
+          <p><strong>Failed on:</strong></p>
+          <ul><li class="text-danger">{failed_name}</li></ul>
+          <p class="alert alert-danger"> {err_message}</p>
+          <p><strong>Skipped:</strong></p>
+          <ul>{skipped_scripts}</ul>
+           <p><strong>{action}:</strong> {count} triples</p>
+        </div>
+        <a href="/routines" class="btn btn-danger mt-3">Return</a>
+      </div>
+    </body>
+    </html>
+    "#
+            )
+        } else {
+            let script_list = success_scripts
+                .iter()
+                .map(|name| format!("<li>{}</li>", name))
+                .collect::<String>();
+
+            format!(
+                r#"
+    <!DOCTYPE html>
+    <html lang="en" data-bs-theme="dark">
+    <head>
+      <meta charset="UTF-8">
+      <title>Success</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="d-flex justify-content-center align-items-center vh-100">
+      <div class="text-center">
+        <h1 class="text-success mb-4">Success!</h1>
+        <div class="alert alert-success text-start mx-auto" style="max-width: 500px;">
+          <p><strong>{action}:</strong> {count} triples</p>
+          <p><strong>Scripts executed:</strong></p>
+          <ul>{script_list}</ul>
+        </div>
+        <a href="/routines" class="btn btn-success mt-3">Return</a>
+      </div>
+    </body>
+    </html>
+    "#
+            )
+        }
+    }
+
+    fn parse_procedures(query_string: &str) -> Vec<(bool, String, String)> {
+        let mut selections: HashMap<String, Vec<String>> = HashMap::new();
+
+        for pair in query_string.split('&') {
+            if let Some((key, _value)) = pair.split_once('=') {
+                if let Some((file, proc)) = key.split_once("::") {
+                    let file = url_decode(file);
+                    let proc = url_decode(proc);
+                    if let Some(l) = selections.get_mut(&file) {
+                        l.push(proc);
+                    } else {
+                        selections.insert(file, vec![proc]);
+                    }
+                }
+            }
+        }
+        let mut found_queries = Vec::new();
+
+        for key in selections.keys() {
+            let wanted = selections.get(key).unwrap();
+            let path = Path::new("routines").join(&key);
+            if let Ok(content) = read_to_string(&path) {
+                let mut current_name = String::new();
+                let mut current_query = String::new();
+                let mut in_proc = false;
+                let mut is_advanced = false;
+
+                for line in content.lines() {
+                    if line.starts_with("##") {
+                        if in_proc && wanted.contains(&current_name) {
+                            found_queries.push((
+                                is_advanced,
+                                current_name,
+                                current_query.trim().to_string(),
+                            ));
+                        }
+                        is_advanced = line.ends_with("@advanced");
+                        current_name = line.trim_start_matches("##").trim().to_string();
+                        current_query.clear();
+                        in_proc = true;
+                    } else if in_proc {
+                        current_query.push_str(line);
+                        current_query.push('\n');
+                    }
+                }
+
+                if in_proc && wanted.contains(&current_name) {
+                    found_queries.push((
+                        is_advanced,
+                        current_name,
+                        current_query.trim().to_string(),
+                    ));
+                }
+            }
+        }
+        found_queries
     }
 }

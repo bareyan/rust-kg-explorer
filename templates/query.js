@@ -1,5 +1,8 @@
 const textarea = document.getElementById("sparqlQuery");
+const secondary = document.getElementById("secondaryQuery");
+secondary.value = "";
 const results = document.getElementById("results");
+const modeInput = document.getElementById("modeInput");
 
 const tableData = [[[table_rows_js_array]]];
 const tableHeaders = [[[table_headers_js_array]]];
@@ -94,30 +97,44 @@ textarea.addEventListener("keydown", function (e) {
   }
 });
 
+secondary.addEventListener("keydown", function (e) {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value =
+      this.value.substring(0, start) + "\t" + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 1;
+  }
+});
+
 document.getElementById("queryForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const encodedQuery = encodeURIComponent(
     textarea.value.replaceAll("#", "%23")
   );
+  const secondaryQuery =
+    modeInput.value === "advanced"
+      ? "&secondary=" +
+        encodeURIComponent(secondary.value.replaceAll("#", "%23"))
+      : "";
+  // console.log;
   const encodedMode = encodeURIComponent(modeInput.value);
   const baseUrl = window.location.origin + window.location.pathname;
-  window.location.href = `${baseUrl}?query=${encodedQuery}&mode=${encodedMode}`;
+  window.location.href =
+    `${baseUrl}?query=${encodedQuery}&mode=${encodedMode}` + secondaryQuery;
+  // console.log(window.location.href);
 });
 
-//MODE CONTROL
-const modeSwitch = document.getElementById("modeSwitch");
-const modeInput = document.getElementById("modeInput");
-const modeLabel = document.getElementById("modeLabel");
-
-modeSwitch.addEventListener("change", () => {
-  if (modeSwitch.checked) {
-    modeInput.value = "update";
-    modeLabel.textContent = "Update Mode";
+function handleModeChange() {
+  if (modeInput.value == "advanced") {
+    secondary.style = "";
   } else {
-    modeInput.value = "query";
-    modeLabel.textContent = "Query Mode";
+    secondary.style = "display:none";
   }
-});
+}
+
+modeInput.addEventListener("change", (e) => handleModeChange());
 
 //Checkbox logic
 function updateDownloadButtonClass() {
@@ -155,7 +172,10 @@ function saveQueryIfSuccess() {
   const successAlert = document.querySelector(".alert-success");
   if (!successAlert) return;
 
-  const currentQuery = textarea.value.trim();
+  let currentQuery = textarea.value.trim();
+  if (modeInput.value === "advanced") {
+    currentQuery = secondary.value.trim() + "\n#\n" + currentQuery;
+  }
   if (!currentQuery) return;
 
   let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -181,8 +201,7 @@ function renderQueryHistory() {
   }
   for (const [index, item] of history.entries()) {
     const div = document.createElement("div");
-    div.className =
-      "mb-3 border rounded p-2 bg-grey d-flex align-items-start gap-2";
+    div.className = "mb-3  rounded p-2 bg-grey d-flex align-items-start gap-2";
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -190,8 +209,16 @@ function renderQueryHistory() {
     checkbox.className = "form-check-input mt-1";
     checkbox.dataset.index = index;
 
-    const preview = item.query.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    let [q1, q2] = item.query.split("\n#\n");
+
+    const preview = q1.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+    let preview2 = "";
     const mode = item.mode;
+    if (mode == "advanced" && q2) {
+      q2 = q2.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      preview2 = `<div style="font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; margin-top: 10px; padding: 5px; border-radius: 5px; border:1px solid grey;">${q2}</div>`;
+    }
     const date = new Date(item.timestamp);
     const dateString = date.toLocaleString();
 
@@ -200,19 +227,29 @@ function renderQueryHistory() {
     queryContent.className = "flex-grow-1";
     queryContent.style = " width: 80%;";
     queryContent.innerHTML = `
-      <div style="font-family: monospace; font-size: 0.85rem; white-space: pre-wrap;">${preview}</div>
-      <small class="text-muted">${dateString}</small>
+      <div style="font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; border:1px solid grey;padding: 5px; border-radius: 5px;">${preview}</div>
+  ${preview2}
+  <small class="text-muted">${dateString}</small>
       <div class="mt-1 d-flex justify-content-end gap-2">
+
         <button class="btn btn-sm btn-primary btn-run">Use</button>
         <button class="btn btn-sm btn-danger btn-delete">Delete</button>
       </div>
     `;
 
     queryContent.querySelector(".btn-run").addEventListener("click", () => {
-      textarea.value = item.query;
+      if (mode === "advanced") {
+        let [q1, q2] = item.query.split("\n#\n");
+        textarea.value = q2;
+        secondary.value = q1;
+      } else {
+        textarea.value = item.query;
+      }
       modeInput.value = mode;
-      modeSwitch.checked = mode === "update";
-      modeLabel.textContent = mode === "update" ? "Update Mode" : "Query Mode";
+
+      handleModeChange();
+      // modeSwitch.checked = mode === "update";
+      // modeLabel.textContent = mode === "update" ? "Update Mode" : "Query Mode";
     });
 
     queryContent.querySelector(".btn-delete").addEventListener("click", () => {
@@ -227,30 +264,37 @@ function renderQueryHistory() {
   }
   addCheckboxListeners();
 }
-
-document.getElementById("download").addEventListener("click", () => {
+document.getElementById("download").addEventListener("click", async () => {
   const history = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
   const checkboxes = document.querySelectorAll(
     '#queryHistoryList input[type="checkbox"]'
   );
-  const selectedQueries = [];
 
-  checkboxes.forEach((checkbox) => {
-    if (checkbox.checked) {
+  const selected = Array.from(checkboxes)
+    .filter((checkbox) => checkbox.checked)
+    .map((checkbox) => {
       const index = parseInt(checkbox.dataset.index, 10);
-      const item = history[index];
-      selectedQueries.push(`###${item.mode}###\n${item.query.trim()}`);
-    }
-  });
+      return history[index];
+    });
 
-  if (selectedQueries.length === 0) {
+  if (selected.length === 0) {
     alert("Please select at least one query to download.");
     return;
   }
 
-  const blob = new Blob([selectedQueries.reverse().join("\n\n")], {
-    type: "text/sparql",
-  });
+  const selectedQueries = await Promise.all(
+    selected.map(async (item) => {
+      const name = await name_query(item.query.trim());
+      return `## ${name}\n${item.query.trim()}`;
+    })
+  );
+
+  const blob = new Blob(
+    ["### Exported\n\n" + selectedQueries.reverse().join("\n\n")],
+    {
+      type: "text/sparql",
+    }
+  );
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
@@ -313,6 +357,7 @@ document
 window.addEventListener("DOMContentLoaded", () => {
   const params = new URLSearchParams(window.location.search);
   const query = params.get("query");
+  const sec = params.get("secondary");
   const mode = params.get("mode") || "query";
 
   if (mode === "update") {
@@ -321,17 +366,15 @@ window.addEventListener("DOMContentLoaded", () => {
 
   textarea.value =
     query && query.trim() !== ""
-      ? query
+      ? query.replaceAll("%23", "#")
       : `SELECT * WHERE {
 ?s ?p ?o
 }`;
-
-  if (mode === "update") {
-    modeSwitch.checked = true;
-    modeInput.value = "update";
-    modeLabel.textContent = "Update Mode";
+  secondary.value = sec && sec.trim() !== "" ? sec.replaceAll("%23", "#") : "";
+  modeInput.value = mode;
+  if (mode == "advanced") {
+    secondary.style = "";
   }
-
   if (tableData.length > 0) renderTable();
 
   saveQueryIfSuccess();
@@ -339,25 +382,10 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 ///AI TERRITORY
-async function generateSPARQLQuery(input, apiKey = "[[api_key]]") {
-  const modelId = "gemini-2.0-flash-lite";
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${apiKey}`;
-
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: input }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: "text/plain",
-    },
-    systemInstruction: {
-      role: "system",
-      parts: [
-        {
-          text: `Purpose and Goals:
+async function generateSPARQLQuery(input) {
+  return ai_req(
+    input,
+    `Purpose and Goals:
   
   * Act as an expert in writing SPARQL queries.
   * Understand natural language descriptions of data retrieval needs.
@@ -388,7 +416,70 @@ async function generateSPARQLQuery(input, apiKey = "[[api_key]]") {
   Overall Tone:
   * Strictly objective and technical.
   * Direct and precise in its output.
-  * Unfailingly accurate in query generation.`,
+  * Unfailingly accurate in query generation.`
+  );
+}
+
+async function name_query(input) {
+  return ai_req(
+    input,
+    `You are an expert SPARQL analyst. Your task is to provide a short, descriptive, one-line name for a given SPARQL procedure.
+
+**Core Logic:**
+
+You will receive one of two types of input:
+
+1.  **Single Query:** A standard SPARQL query (\`SELECT\`, \`INSERT\`, \`DELETE\`, etc.). Your name should summarize its primary function.
+2.  **Looping Query (Special Case):** A \`SELECT\` query, followed by \`\\n#\\n\`, followed by an \`UPDATE\` query.
+
+**Handling the Special Case:**
+
+This two-part structure defines a loop:
+- The \`SELECT\` query identifies a set of target rows.
+- The \`UPDATE\` query is then executed for each row, with placeholders like \`{{variable}}\` being replaced by the values from that row.
+
+For this case, your name **must** describe the **entire, high-level procedure**. Synthesize the "find" action of the \`SELECT\` and the "change" action of the \`UPDATE\` into a single, cohesive description of the overall goal.
+
+**Example (Special Case):**
+
+*   **Query:**
+    \`\`\`sparql
+    SELECT ?s1 ?s2 WHERE {
+        ?s1 <http://schema.org/item> ?o.
+        ?s2 <http://schema.org/item> ?o.
+        FILTER(STR(?s1) < STR(?s2))
+    }
+    #
+    DELETE { {{s2}} ?p ?o } INSERT { {{s1}} ?p ?o } WHERE  { {{s2}} ?p ?o };
+    DELETE { ?sub ?pred {{s2}} } INSERT { ?sub ?pred {{s1}} } WHERE  { ?sub ?pred {{s2}} }
+    \`\`\`
+*   **Correct Name:** Merge duplicate entities into a single canonical entity.
+
+**Output Format:**
+- Your response must be **only the one-line name**.
+- Do not add any introductory text, explanations, or quotation marks.`
+  );
+}
+
+async function ai_req(input, systemInstructions, apiKey = "[[api_key]]") {
+  const modelId = "gemini-2.5-flash-lite-preview-06-17";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: input }],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: "text/plain",
+    },
+    systemInstruction: {
+      role: "system",
+      parts: [
+        {
+          text: systemInstructions,
         },
       ],
     },

@@ -1,0 +1,62 @@
+### Blank node and url cleanup 
+
+## SkolemURI to URL Replacement
+PREFIX schema: <http://schema.org/>
+DELETE {
+    ?sub ?p ?s .
+}
+INSERT{
+    ?sub ?p ?url.
+}
+WHERE {
+    ?s schema:url ?url .
+    FILTER (strstarts(str(?s), "urn:skolem")) .
+    FILTER NOT EXISTS {
+        ?s schema:url ?url2 .
+        FILTER(?url != ?url2)
+    }
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+INSERT{
+    ?url ?p ?o.
+}
+WHERE {
+    ?s schema:url ?url .
+    FILTER (strstarts(str(?s), "urn:skolem")) .
+    FILTER NOT EXISTS {
+        ?s schema:url ?url2 .
+        FILTER(?url != ?url2)
+    }
+    ?s ?p ?o.
+}
+
+## Item URL to IRI
+DELETE {
+    ?s <http://schema.org/item> ?o.
+}
+INSERT {
+    ?s <http://schema.org/item> ?newIRI.
+}
+WHERE {
+    ?s <http://schema.org/item> ?o.
+    FILTER(isLiteral(?o))
+    BIND (IRI(STR(?o)) AS ?newIRI)
+}
+
+## Merge entities by item@advanced
+SELECT ?s1 ?s2 WHERE {
+    ?s1 <http://schema.org/item> ?o.
+    ?s2 <http://schema.org/item> ?o.
+    FILTER(STR(?s1) < STR(?s2))
+}
+#
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o };
+DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} }

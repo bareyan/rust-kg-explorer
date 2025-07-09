@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use std::fs;
 
 pub struct Template<'a> {
@@ -31,19 +31,20 @@ impl<'a> Template<'a> {
         result
     }
 }
+
 #[macro_export]
 macro_rules! named_args {
-    ($($key:ident = $value:expr),* $(,)?) => {{
+    ($($key:ident = $value:expr),* $(,)?) => {
+        {
         let mut map = std::collections::HashMap::new();
         $(
-            map.insert(stringify!($key), $value);
+            map.insert(stringify!($key), $value.as_ref());
         )*
         map
-    }};
+        }
+    };
 }
 
-
-
-pub fn include_str(path: &str)->String{
+pub fn include_str(path: &str) -> String {
     fs::read_to_string(path).unwrap()
 }

@@ -1,6 +1,7 @@
-use std::env;
+use std::{ env, fs };
+use std::path::Path;
 
-use crate::{ named_args, web_ui::templetization::{ Template } };
+use crate::{ named_args, utils::escape_html, web_ui::templetization::Template };
 use crate::web_ui::templetization::include_str;
 
 pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {
@@ -128,4 +129,89 @@ pub(crate) fn class_card(name: &str, count: u32) -> String {
     );
 
     template.render(named_args!(name = name, entity_name = entity_name, count = count))
+}
+
+pub(crate) fn routines_page() -> String {
+    let mut script_cards = String::new();
+
+    if let Ok(entries) = fs::read_dir("routines") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "sparql") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    script_cards += &script_card(&path, &content);
+                }
+            }
+        }
+    }
+    let template = Template::new(include_str!("../../templates/routines.html"), &["script_cards"]);
+
+    template.render(named_args!(script_cards = &script_cards))
+}
+
+fn script_card(path: &Path, content: &str) -> String {
+    let file_name = path.file_name().unwrap().to_string_lossy();
+    let mut lines = content.lines();
+    let description = lines.next().unwrap_or("").trim_start_matches("###").trim();
+
+    let mut body = String::new();
+    let mut current_proc_name = String::new();
+    let mut current_proc_query = String::new();
+    let mut in_proc = false;
+
+    for line in lines {
+        if line.starts_with("##") {
+            if in_proc {
+                body += &procedure_section(&file_name, &current_proc_name, &current_proc_query);
+                current_proc_query.clear();
+            }
+            current_proc_name = line.trim_start_matches("##").trim().to_string();
+            in_proc = true;
+        } else if in_proc {
+            current_proc_query.push_str(line);
+            current_proc_query.push('\n');
+        }
+    }
+
+    if in_proc {
+        body += &procedure_section(&file_name, &current_proc_name, &current_proc_query);
+    }
+
+    format!(
+        r#"<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+            <h5 class="mb-0">{}</h5>
+            <small class="text-muted">{}</small>
+        </div>
+        <div>
+            <input type="checkbox" class="form-check-input" onchange="toggleFile(this)" data-file="{}">
+            <label class="form-check-label ms-1">Run entire file</label>
+        </div>
+    </div>
+    <div class="card-body">{}</div>
+</div>"#,
+        file_name,
+        description,
+        file_name,
+        body
+    )
+}
+
+fn procedure_section(file: &str, name: &str, query: &str) -> String {
+    let query = escape_html(query.to_string());
+    let elem_id = format!("{file}::{name}");
+
+    format!(
+        r#"<div class="mb-3">
+    <div class="form-check">
+        <input class="form-check-input file-proc" type="checkbox"
+               name="{elem_id}"
+               data-file="{file}" data-id="{elem_id}"
+               onchange="toggleProcedure(this)">
+        <label class="form-check-label fw-bold">{name}</label>
+    </div>
+    <pre class="bg-body border rounded p-2 mt-2" style="display:none" id="{elem_id}"><code>{query}</code></pre>
+</div>"#
+    )
 }

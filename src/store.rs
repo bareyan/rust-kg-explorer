@@ -6,7 +6,7 @@ use std::sync::atomic::{ AtomicUsize, Ordering };
 use std::sync::Arc;
 use std::time::Instant;
 use flate2::read::GzDecoder;
-use std::vec;
+use std::{ vec };
 use std::path::Path;
 use oxigraph::model::{ NamedNode, Term };
 use oxigraph::store::Store;
@@ -14,7 +14,7 @@ use oxigraph::sparql::{ QueryResults, QuerySolution };
 use oxigraph::io::{ RdfParser, RdfFormat };
 use item::Item;
 
-use crate::utils::{ self, cleanup, extract_literal, merge_list_items, verify_valid };
+use crate::utils::{ self, extract_literal, verify_valid };
 use crate::item;
 
 pub enum StoreError {
@@ -44,6 +44,7 @@ impl KG {
         created.load();
         created
     }
+
     pub fn from_file(dataset_path: &str) -> KG {
         let mut created = KG {
             dataset: dataset_path.to_string(),
@@ -54,6 +55,7 @@ impl KG {
         created.load_file(dataset_path);
         created
     }
+
     fn download_dataset(&self) {
         let mut now = Instant::now();
 
@@ -140,6 +142,7 @@ impl KG {
         }
         println!("Preprocessed part files in {:.2?}", now.elapsed());
     }
+
     fn load_file(&mut self, file_path: &str) {
         let filename = match file_path.split("/").last() {
             Some(f) => f,
@@ -186,6 +189,7 @@ impl KG {
         }
         self.store = Some(store);
     }
+
     fn load(&mut self) {
         let now = Instant::now();
         // Load the oxigraph database
@@ -211,8 +215,6 @@ impl KG {
                     })
                     .load_from_reader(parser, reader)
                     .expect("Failed to load NTriples");
-                cleanup(&store);
-                merge_list_items(&store);
             }
             let final_count = ignored_lines_count.load(Ordering::Relaxed);
             println!(
@@ -226,12 +228,7 @@ impl KG {
         self.store = Some(store);
     }
 
-    pub fn get_objects(
-        &self,
-        object_type: &str,
-        limit: u32,
-        offset: u32
-    ) -> Vec<oxigraph::model::Term> {
+    pub fn get_objects(&self, object_type: &str, limit: u32, offset: u32) -> Vec<Term> {
         let q = format!(
             "
             SELECT DISTINCT ?obj WHERE {{
@@ -253,7 +250,7 @@ impl KG {
         res
     }
 
-    pub fn get_info(&self, object: oxigraph::model::Term) -> Item {
+    pub fn get_info(&self, object: Term) -> Item {
         match object {
             Term::NamedNode(named_node) => {
                 let type_query =
@@ -368,43 +365,7 @@ impl KG {
         Item::new(node.into(), otypes, name, description, self.get_images(object, is_img))
     }
 
-    pub fn query(&self, query: &str) -> Result<Vec<QuerySolution>, StoreError> {
-        if let Some(store) = &self.store {
-            let result = store.query(query);
-            match result {
-                Ok(QueryResults::Solutions(query_solution_iter)) => {
-                    let mut result: Vec<QuerySolution> = vec![];
-                    for sol in query_solution_iter {
-                        match sol {
-                            Ok(solution) => {
-                                result.push(solution);
-                            }
-                            Err(_) => panic!("Some error accured with the request"),
-                        }
-                    }
-                    Ok(result)
-                }
-                Ok(_) => Err(StoreError::UnsupportedError),
-                Err(e) => Err(StoreError::EvaluationError(e.to_string())),
-            }
-        } else {
-            panic!("Store is not initialized");
-        }
-    }
-
-    pub fn update(&self, query: &str) -> Result<(), StoreError> {
-        if let Some(store) = &self.store {
-            let r = store.update(query);
-            match r {
-                Ok(_) => Ok(()),
-                Err(e) => Err(StoreError::EvaluationError(e.to_string())),
-            }
-        } else {
-            panic!("Store is not initialized");
-        }
-    }
-
-    pub fn get_images(&self, object: &str, is_img: bool) -> Vec<String> {
+    fn get_images(&self, object: &str, is_img: bool) -> Vec<String> {
         let query_image = if is_img {
             format!(
                 r#"
@@ -444,5 +405,103 @@ impl KG {
             }
         }
         imgs
+    }
+
+    //Sparql queries
+    pub fn query(&self, query: &str) -> Result<Vec<QuerySolution>, StoreError> {
+        if let Some(store) = &self.store {
+            let result = store.query(query);
+            match result {
+                Ok(QueryResults::Solutions(query_solution_iter)) => {
+                    let mut result: Vec<QuerySolution> = vec![];
+                    for sol in query_solution_iter {
+                        match sol {
+                            Ok(solution) => {
+                                result.push(solution);
+                            }
+                            Err(_) => panic!("Some error accured with the request"),
+                        }
+                    }
+                    Ok(result)
+                }
+                Ok(_) => Err(StoreError::UnsupportedError),
+                Err(e) => Err(StoreError::EvaluationError(e.to_string())),
+            }
+        } else {
+            panic!("Store is not initialized");
+        }
+    }
+
+    pub fn update(&self, query: &str) -> Result<(), StoreError> {
+        if let Some(store) = &self.store {
+            let r = store.update(query);
+            match r {
+                Ok(_) => Ok(()),
+                Err(e) => Err(StoreError::EvaluationError(e.to_string())),
+            }
+        } else {
+            panic!("Store is not initialized");
+        }
+    }
+
+    pub fn iterative_update(
+        &self,
+        select_query: &str,
+        update_query: &str
+    ) -> Result<(), StoreError> {
+        let select_result = self.query(select_query);
+        match select_result {
+            Ok(result) => {
+                if result.is_empty() {
+                    return Ok(());
+                }
+                let vars = result
+                    .get(0)
+                    .unwrap()
+                    .variables()
+                    .iter()
+                    .map(|v| v.as_str())
+                    .collect::<Vec<&str>>();
+
+                for r in &result {
+                    let mut uq = update_query.to_string();
+                    for v in &vars {
+                        let var = r.get(*v).unwrap().to_string();
+                        uq = uq.replace(&format!(r#"{{{{{v}}}}}"#), &var);
+                    }
+                    match self.update(&uq) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            return Err(
+                                StoreError::EvaluationError("Invalid update query".to_string())
+                            );
+                        }
+                    }
+                }
+                println!("Ran {} queries", result.len());
+
+                Ok(())
+            }
+            Err(_) => { Err(StoreError::EvaluationError("Invalid Select Query".to_string())) }
+        }
+    }
+
+    pub fn count_lines(&self) -> u64 {
+        let query = "SELECT (COUNT(*) as ?count) WHERE { ?s ?p ?o }";
+        match self.query(query) {
+            Ok(solutions) => {
+                if let Some(solution) = solutions.first() {
+                    if let Some(count_term) = solution.get("count") {
+                        if let Some(count_str) = extract_literal(Some(count_term)) {
+                            if let Ok(count) = count_str.parse::<u64>() {
+                                return count;
+                            }
+                        }
+                    }
+                }
+                0
+            }
+            Err(_) => 0,
+        }
     }
 }

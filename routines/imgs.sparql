@@ -1,0 +1,97 @@
+### Transforms all of the objects used with the image/photo/logo predicates to imageObjects.
+
+## Transform literals to IRIs for image/photo/logo predicate
+DELETE {
+    ?s <http://schema.org/url> ?url.
+}
+INSERT {
+    ?s <http://schema.org/url> ?newIRI.
+}
+WHERE {
+    ?s <http://schema.org/image> ?url.
+    FILTER(isLiteral(?url))
+    BIND (IRI(STR(?url)) AS ?newIRI)
+};
+
+DELETE {
+    ?s <http://schema.org/url> ?url.
+}
+INSERT {
+    ?s <http://schema.org/url> ?newIRI.
+}
+WHERE {
+    ?s <http://schema.org/photo> ?url.
+    FILTER(isLiteral(?url))
+    BIND (IRI(STR(?url)) AS ?newIRI)
+};
+
+DELETE {
+    ?s <http://schema.org/url> ?url.
+}
+INSERT {
+    ?s <http://schema.org/url> ?newIRI.
+}
+WHERE {
+    ?s <http://schema.org/logo> ?url.
+    FILTER(isLiteral(?url))
+    BIND (IRI(STR(?url)) AS ?newIRI)
+};
+
+## Replace ImageObjects with their URLs
+DELETE {
+    ?sub ?p ?s.
+}
+INSERT {
+    ?sub ?p ?url.
+}
+WHERE {
+    ?s a <http://schema.org/ImageObject>.
+    ?s <http://schema.org/url> ?url.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+INSERT {
+    ?url ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/ImageObject>.
+    ?s <http://schema.org/url> ?url.
+    ?s ?p ?o.
+};
+
+## Add ImageObject annotation for objects used with predicate image/photo/logo
+INSERT {
+    ?url a <http://schema.org/ImageObject>.
+    ?url <http://schema.org/url> ?url.
+}
+WHERE {
+    ?s <http://schema.org/image> ?url.
+    FILTER NOT EXISTS {
+        ?url ?p ?o.
+    }
+};
+
+INSERT {
+    ?url a <http://schema.org/ImageObject>.
+    ?url <http://schema.org/url> ?url.
+}
+WHERE {
+    ?s <http://schema.org/photo> ?url.
+    FILTER NOT EXISTS {
+        ?url ?p ?o.
+    }
+};
+
+INSERT {
+    ?url a <http://schema.org/ImageObject>.
+    ?url <http://schema.org/url> ?url.
+}
+WHERE {
+    ?s <http://schema.org/logo> ?url.
+    FILTER NOT EXISTS {
+        ?url ?p ?o.
+    }
+};

@@ -43,23 +43,32 @@
               <label for="sparqlQuery" class="form-label mb-0"
                 >Enter SPARQL Query:</label
               >
-              <div class="form-check form-switch">
-                <input
-                  class="form-check-input"
-                  type="checkbox"
-                  role="switch"
-                  id="modeSwitch"
-                />
-                <label class="form-check-label" for="modeSwitch" id="modeLabel"
-                  >Query Mode</label
+              <div class="dropdown">
+                <select
+                  class="form-select"
+                  id="modeInput"
+                  aria-label="Query mode selection"
                 >
+                  <option value="query" selected>Query Mode</option>
+                  <option value="update">Update Mode</option>
+                  <option value="advanced">Advanced Mode</option>
+                </select>
               </div>
             </div>
-            <input type="hidden" id="modeInput" name="mode" value="query" />
+            <!-- <input type="hidden" id="modeInput" name="mode" value="query" /> -->
             <div
               class="mb-3"
               style="position: relative; display: inline-block; width: 100%"
             >
+              <textarea
+                class="form-control"
+                id="secondaryQuery"
+                name="secondary"
+                rows="10"
+                placeholder="WRITE YOUR INITIAL SELECT QUERY HERE"
+                style="display: none"
+              >
+              </textarea>
               <textarea
                 class="form-control"
                 id="sparqlQuery"
@@ -67,8 +76,9 @@
                 rows="10"
                 placeholder="WRITE YOUR SPARQL QUERY HERE..."
               >
-              </textarea
-              ><a
+              </textarea>
+
+              <a
                 id="ai_helper"
                 class="btn btn-primary"
                 style="
