@@ -1,0 +1,27 @@
+### Dealing with country entities
+
+## Merge by name, assign a new iri
+DELETE {
+  ?s2 ?p ?s .
+}
+INSERT {
+  ?s2 ?p ?newIRI.
+}
+WHERE {
+    ?s a <http://schema.org/Country> .
+    ?s <http://schema.org/name> ?country .
+    ?s2 ?p ?s .
+    BIND(IRI(CONCAT("urn:Country:", STR(?country))) AS ?newIRI)
+};
+DELETE {
+  ?s ?p ?o
+}
+INSERT {
+  ?newIRI ?p ?o
+}
+WHERE {
+    ?s a <http://schema.org/Country> .
+    ?s <http://schema.org/name> ?country .
+    ?s ?p ?o .
+    BIND(IRI(CONCAT("urn:Country:", STR(?country))) AS ?newIRI)
+}

@@ -1,0 +1,49 @@
+### Simplifications for book entities
+
+## Invalidate wrong isbns
+DELETE {
+  ?s <http://schema.org/isbn> ?isbn .
+}
+INSERT {
+  ?s <http://schema.org/isbn> ?normalizedIsbn .
+}
+WHERE {
+  ?s <http://schema.org/isbn> ?isbn .
+  BIND(REPLACE(STR(?isbn), "[^0-9]", "") AS ?normalizedIsbn)
+};
+
+DELETE {
+  ?s <http://schema.org/isbn> ?isbn .
+}
+WHERE {
+  ?s <http://schema.org/isbn> ?isbn .
+  FILTER(strlen(?isbn)!=13)
+};
+
+
+## Merge by isbn, assign a new IRI
+DELETE {
+  ?sub ?p ?s
+}
+INSERT {
+  ?sub ?p ?newIRI
+}
+WHERE {
+    ?s <http://schema.org/isbn> ?isbn .
+    ?sub ?p ?s .
+    FILTER (strstarts(str(?s), "urn:skolem")) .
+    BIND(IRI(CONCAT("urn:isbn:", STR(?isbn))) AS ?newIRI)
+};
+
+DELETE {
+  ?s ?p ?o
+}
+INSERT {
+  ?newIRI ?p ?o
+}
+WHERE {
+    ?s <http://schema.org/isbn> ?isbn .
+    ?s ?p ?o .
+    FILTER (strstarts(str(?s), "urn:skolem")) .
+    BIND(IRI(CONCAT("urn:isbn:", STR(?isbn))) AS ?newIRI)
+};
