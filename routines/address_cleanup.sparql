@@ -1,0 +1,17 @@
+### ADDRESS
+
+## Merge if the two@advanced
+SELECT ?s1 ?s2
+WHERE {
+  ?subject <http://schema.org/address> ?s1 .
+  ?subject <http://schema.org/address> ?s2 .
+
+  FILTER (STR(?s1)<STR(?s2))
+}
+#
+DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }

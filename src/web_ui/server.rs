@@ -1,5 +1,5 @@
 use std::collections::{ HashMap, HashSet };
-use std::fs::read_to_string;
+use std::fs::{ read_to_string, File };
 use std::io::prelude::*;
 use std::net::{ TcpListener, TcpStream };
 use std::path::Path;
@@ -8,8 +8,16 @@ use std::thread;
 
 use crate::store::KG;
 use crate::utils::{ escape_html, format_json, linkify, schema_link, to_link, url_decode };
-use crate::web_ui::html_templates::{ self, entity_page, index_page, query_page, routines_page };
+use crate::web_ui::html_templates::{
+    self,
+    entity_page,
+    history_page,
+    index_page,
+    query_page,
+    routines_page,
+};
 use crate::store::StoreError;
+use crate::web_ui::templetization::include_str;
 enum Page {
     Index,
     Explore(String, u32),
@@ -18,6 +26,8 @@ enum Page {
     Run(Vec<(bool, String, String)>),
     Scripts,
     Error,
+    Redirect,
+    History,
 }
 
 pub(crate) struct WebServer {
@@ -131,6 +141,20 @@ impl WebServer {
                     ("HTTP/1.1 200 OK", Page::Scripts)
                 }
             }
+            "/dump" => {
+                self.dataset.dump_store();
+                ("HTTP/1.1 200 OK", Page::Redirect)
+            }
+            "/history" => { ("HTTP/1.1 200 OK", Page::History) }
+            route if route.starts_with("/restore/") => {
+                let v = route
+                    .replace("/restore/version_", "")
+                    .replace(".nt", "")
+                    .parse::<u32>()
+                    .unwrap();
+                self.dataset.revert(v);
+                ("HTTP/1.1 200 OK", Page::Redirect)
+            }
             _ => ("HTTP/1.1 404 NOT FOUND", Page::Error),
         };
 
@@ -144,6 +168,19 @@ impl WebServer {
             Page::Scripts => self.generate_scripts(),
             Page::Run(scripts) => self.generate_run_results(scripts),
             Page::Error => self.generate_error(),
+            Page::Redirect => {
+                r#"<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="refresh" content="0; url=/" />
+    <title>Redirecting...</title>
+  </head>
+  <body>
+    <p>If you are not redirected automatically, <a href="/">click here</a>.</p>
+  </body>
+</html>"#.to_string()
+            }
+            Page::History => { self.generate_history() }
         };
 
         let response = format!(
@@ -289,7 +326,17 @@ impl WebServer {
                 "update" => {
                     let query_result = self.dataset.update(q);
                     match query_result {
-                        Ok(()) => (),
+                        Ok(()) => {
+                            if
+                                let Ok(mut file) = std::fs::OpenOptions
+                                    ::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                            {
+                                let _ = writeln!(file, "```sparql\n{}\n```", q);
+                            }
+                        }
                         Err(StoreError::EvaluationError(ee)) => {
                             message = ee;
                             message_type = "danger";
@@ -298,8 +345,18 @@ impl WebServer {
                     }
                 }
                 "advanced" => {
-                    match self.dataset.iterative_update(&sq.unwrap(), q) {
-                        Ok(()) => (),
+                    match self.dataset.iterative_update(&sq.clone().unwrap(), q) {
+                        Ok(()) => {
+                            if
+                                let Ok(mut file) = std::fs::OpenOptions
+                                    ::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                            {
+                                let _ = writeln!(file, "```sparql\n{}\n#\n{}\n```", sq.unwrap(), q);
+                            }
+                        }
                         Err(StoreError::EvaluationError(ee)) => {
                             message = ee;
                             message_type = "danger";
@@ -364,8 +421,8 @@ impl WebServer {
           <td>{}</td>
           <td>{}</td>
         </tr>",
-                escape_html(row.get("pred").unwrap().to_string()),
-                to_link(escape_html(row.get("obj").unwrap().to_string()))
+                escape_html(&row.get("pred").unwrap().to_string()),
+                to_link(escape_html(&row.get("obj").unwrap().to_string()))
             );
         }
         //Table 2 generation
@@ -384,14 +441,14 @@ impl WebServer {
           <td>{}</td>
           <td>{}</td>
         </tr>",
-                to_link(escape_html(row.get("sub").unwrap().to_string())),
-                escape_html(row.get("pred").unwrap().to_string())
+                to_link(escape_html(&row.get("sub").unwrap().to_string())),
+                escape_html(&row.get("pred").unwrap().to_string())
             );
         }
 
         let mut entity_types = String::new();
         for tp in itm.entity_types {
-            entity_types += &schema_link(escape_html(tp.to_string()));
+            entity_types += &schema_link(escape_html(&tp.to_string()));
         }
 
         let name = &itm.name.unwrap_or("No name found".to_string());
@@ -505,7 +562,18 @@ impl WebServer {
                 self.dataset.update(query)
             };
             match result {
-                Ok(_) => success_scripts.push(script_name.clone()),
+                Ok(_) => {
+                    success_scripts.push(script_name.clone());
+                    if
+                        let Ok(mut file) = std::fs::OpenOptions
+                            ::new()
+                            .create(true)
+                            .append(true)
+                            .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                    {
+                        let _ = writeln!(file, "{}", script_name);
+                    }
+                }
                 Err(StoreError::EvaluationError(ee)) => {
                     err_message = ee;
                     err = true;
@@ -632,7 +700,7 @@ impl WebServer {
                         if in_proc && wanted.contains(&current_name) {
                             found_queries.push((
                                 is_advanced,
-                                current_name,
+                                format!("{}::{}", key, current_name),
                                 current_query.trim().to_string(),
                             ));
                         }
@@ -649,12 +717,74 @@ impl WebServer {
                 if in_proc && wanted.contains(&current_name) {
                     found_queries.push((
                         is_advanced,
-                        current_name,
+                        format!("{}::{}", key, current_name),
                         current_query.trim().to_string(),
                     ));
                 }
             }
         }
         found_queries
+    }
+
+    fn generate_history(&self) -> String {
+        let input = include_str(&format!("./data/{}/history.txt", self.dataset.dataset));
+        let mut lines = input.lines().map(str::trim);
+        let mut inside = String::new();
+        let mut sparql_block = String::new();
+        let mut in_sparql = false;
+
+        for line in lines {
+            if line.starts_with("```sparql") {
+                in_sparql = true;
+                sparql_block.clear();
+            } else if line.starts_with("```") && in_sparql {
+                in_sparql = false;
+                inside.push_str(
+                    r#"<div class="card mb-3 shadow-sm">
+          <div class="card-header bg-light text-dark">SPARQL Script</div>
+          <div class="card-body">
+            <pre class="bg-dark border p-3"><code>"#
+                );
+                inside.push_str(&escape_html(&sparql_block));
+                inside.push_str("</code></pre>\n  </div>\n</div>\n");
+            } else if in_sparql {
+                sparql_block.push_str(line);
+                sparql_block.push('\n');
+            } else if let Some((file, desc)) = line.split_once("::") {
+                inside.push_str(
+                    &format!(
+                        r#"<div class="card mb-3 shadow-sm">
+          <div class="card-header bg-secondary text-white">{}</div>
+          <div class="card-body">
+            <span class="badge bg-info text-dark">Change</span> {}
+          </div>
+        </div>
+        "#,
+                        escape_html(&file.to_string()),
+                        escape_html(&desc.to_string())
+                    )
+                );
+            } else if line.starts_with("Dumping") {
+                inside.push_str(
+                    &format!(
+                        r#"<div class="card mb-3 shadow-sm">
+          <div class="card-header bg-success text-white">Dump created!</div>
+          <div class="card-body">
+            <span class="badge bg-info text-dark">Dump file</span> {}
+          </div>
+          <div class='d-flex justify-content-center py-2'>
+          <a href="/restore/{}" class='btn btn-danger'>Revert to this version(all of the following changes and dumps will be lost)</a>
+          </div>
+        </div>"#,
+                        line.replace("Dumping store to", ""),
+                        line.replace(
+                            &format!("Dumping store to ./data/{}/", self.dataset.dataset),
+                            ""
+                        )
+                    )
+                );
+            }
+        }
+        history_page(inside)
     }
 }

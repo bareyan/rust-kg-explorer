@@ -8,7 +8,7 @@ use std::time::Instant;
 use flate2::read::GzDecoder;
 use std::{ vec };
 use std::path::Path;
-use oxigraph::model::{ NamedNode, Term };
+use oxigraph::model::{ GraphNameRef, NamedNode, Term };
 use oxigraph::store::Store;
 use oxigraph::sparql::{ QueryResults, QuerySolution };
 use oxigraph::io::{ RdfParser, RdfFormat };
@@ -17,6 +17,7 @@ use item::Item;
 use crate::utils::{ self, extract_literal, verify_valid };
 use crate::item;
 
+use crate::web_ui::templetization::include_str;
 pub enum StoreError {
     EvaluationError(String),
     UnsupportedError,
@@ -502,6 +503,86 @@ impl KG {
                 0
             }
             Err(_) => 0,
+        }
+    }
+
+    pub fn dump_store(&self) {
+        if let Some(store) = &self.store {
+            let dir_path = format!("./data/{}/", self.dataset);
+
+            let mut version = 1;
+            loop {
+                let file_path = format!("{}version_{}.nt", dir_path, version);
+                if !Path::new(&file_path).exists() {
+                    break;
+                }
+                version += 1;
+            }
+
+            let file_path = format!("{}version_{}.nt", dir_path, version);
+
+            println!("Dumping store to {}", file_path);
+
+            if
+                let Ok(mut file) = std::fs::OpenOptions
+                    ::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("./data/{}/history.txt", self.dataset))
+            {
+                let _ = writeln!(file, "Dumping store to {}", file_path);
+            }
+
+            let mut file = File::create(&file_path).expect("Failed to create dump file");
+
+            let mut buffer = Vec::new();
+            let _ = store.dump_graph_to_writer(
+                GraphNameRef::DefaultGraph,
+                RdfFormat::NTriples,
+                &mut buffer
+            );
+
+            let _ = file.write(&buffer);
+        }
+    }
+
+    pub fn revert(&self, version: u32) {
+        if let Some(store) = &self.store {
+            store.clear();
+            let dir_path = format!("./data/{}/", self.dataset);
+
+            let file_path = format!("{}version_{}.nt", dir_path, version);
+            let parser = File::open(file_path).unwrap();
+            store
+                .bulk_loader()
+                .with_num_threads(16)
+                .load_from_reader(RdfParser::from_format(RdfFormat::NTriples), parser)
+                .expect("Failed to load file");
+
+            let history_path = format!("./data/{}/history.txt", self.dataset);
+            if let Ok(content) = std::fs::read_to_string(&history_path) {
+                let target_line = format!(
+                    "Dumping store to ./data/{}/version_{}.nt",
+                    self.dataset,
+                    version
+                );
+                if let Some(pos) = content.find(&target_line) {
+                    let end_pos = pos + target_line.len();
+                    if let Some(newline_pos) = content[end_pos..].find('\n') {
+                        let truncated_content = &content[..end_pos + newline_pos + 1];
+                        let _ = std::fs::write(&history_path, truncated_content);
+                    }
+                }
+            }
+            let mut v = version + 1;
+            loop {
+                let file_path = format!("{}version_{}.nt", dir_path, v);
+                if !Path::new(&file_path).exists() {
+                    break;
+                }
+                std::fs::remove_file(&file_path);
+                v += 1;
+            }
         }
     }
 }

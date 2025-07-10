@@ -29,7 +29,7 @@ Pass the `--wdc` flag along with the dataset name and (optionally) the number of
 Example:
 
 ```
-cargo run -- --wdc --dataset Book --nb_parts 3
+cargo run -- --wdc --dataset Book --nb-parts 3
 ```
 
 ### Running in File Mode
@@ -47,3 +47,5 @@ cargo run -- --dataset /path/to/my_file.nt
 
 - `src/`: Contains all Rust source files.
 - `data/`: Stores the downloaded and preprocessed KG data.
+- `templates/`: Contains all of the templates for the web pages
+- `routines/`: Contains all the routine files

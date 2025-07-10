@@ -54,9 +54,10 @@ SELECT ?s1 ?s2 WHERE {
     FILTER(STR(?s1) < STR(?s2))
 }
 #
-DELETE { {{s2}} ?p ?o }
-INSERT { {{s1}} ?p ?o }
-WHERE  { {{s2}} ?p ?o };
 DELETE { ?sub ?pred {{s2}} }
 INSERT { ?sub ?pred {{s1}} }
-WHERE  { ?sub ?pred {{s2}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }
+

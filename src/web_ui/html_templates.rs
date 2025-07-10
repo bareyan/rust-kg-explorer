@@ -149,6 +149,12 @@ pub(crate) fn routines_page() -> String {
     template.render(named_args!(script_cards = &script_cards))
 }
 
+pub(crate) fn history_page(inside: String) -> String {
+    let template = Template::new(include_str!("../../templates/history.html"), &["inside"]);
+
+    template.render(named_args!(inside = inside))
+}
+
 fn script_card(path: &Path, content: &str) -> String {
     let file_name = path.file_name().unwrap().to_string_lossy();
     let mut lines = content.lines();
@@ -199,7 +205,7 @@ fn script_card(path: &Path, content: &str) -> String {
 }
 
 fn procedure_section(file: &str, name: &str, query: &str) -> String {
-    let query = escape_html(query.to_string());
+    let query = escape_html(&query.to_string());
     let elem_id = format!("{file}::{name}");
 
     format!(

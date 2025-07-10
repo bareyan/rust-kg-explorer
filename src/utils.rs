@@ -79,7 +79,7 @@ pub(crate) fn extract_literal(term: Option<&Term>) -> Option<String> {
     }
 }
 
-pub fn escape_html(data: String) -> String {
+pub fn escape_html(data: &String) -> String {
     data.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 
@@ -110,9 +110,9 @@ pub fn linkify(data: &str) -> String {
     // println!("{data}");
     if data.starts_with("<http") {
         let d = data.replace("<", "").replace(">", "");
-        return format!("<a href=\"{d}\">{}</a>", escape_html(data.to_string()));
+        return format!("<a href=\"{d}\">{}</a>", escape_html(&data.to_string()));
     }
-    escape_html(data.to_string())
+    escape_html(&data.to_string())
 }
 
 pub fn verify_valid(uri: &String) -> bool {
@@ -144,13 +144,13 @@ pub fn format_json(entity: String, props: Vec<QuerySolution>) -> String {
             "[\"{}\",  \'{}\'],",
             escape_js(
                 escape_html(
-                    p
+                    &p
                         .replace("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "type")
                         .replace("<http://schema.org/", ":")
                         .replace(">", "")
                 )
             ),
-            escape_js(escape_html(o.to_string()))
+            escape_js(escape_html(&o.to_string()))
         );
     }
 

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-askama = "0.14.0"
 clap = {version="4.5.40", features = ["derive"] }
 dotenv = "0.15.0"
 flate2 = "1.1.2"
@@ -14,8 +13,6 @@ percent-encoding = "2.3.1"
 regex = "1.11.1"
 reqwest = {version = "0.12.20", features=["blocking"]}
 url = "2.5.4"
-uuid = { version = "1.17.0", features = ["v4"] }
-
 
 [profile.dev]
 opt-level = 3
