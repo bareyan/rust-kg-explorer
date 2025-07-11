@@ -1,4 +1,5 @@
 use core::panic;
+use core::result::Result;
 use std::fs::File;
 use std::io::{ Write };
 use std::str::FromStr;
@@ -506,6 +507,63 @@ impl KG {
         }
     }
 
+    pub fn merge_entities(&self, ent: String, merge_using: Vec<String>) -> Result<(), StoreError> {
+        let mut criteres = String::new();
+        for (i, m) in merge_using.iter().enumerate() {
+            criteres += &format!("?s1 {m} ?o{i}. ?s2 {m} ?o{i}.");
+        }
+        let q = format!(
+            r#"
+            SELECT ?s1 ?s2 WHERE  {{
+                ?s1 a {0}.
+                ?s2 a {0}.
+        {criteres}
+        FILTER(STR(?s1) < STR(?s2))
+    }}
+        "#,
+            ent
+        );
+        let r = self.iterative_update(
+            &q,
+            r#"
+        DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }
+        "#
+        );
+        if
+            let Ok(mut file) = std::fs::OpenOptions
+                ::new()
+                .create(true)
+                .append(true)
+                .open(
+                    format!(
+                        "./data/{}.db/history.txt",
+                        self.dataset.to_lowercase().split("/").last().unwrap_or(&self.dataset)
+                    )
+                )
+        {
+            let _ = writeln!(
+                file,
+                "```sparql\n{}\n#\n{}```",
+                q,
+                r#"
+DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }
+        "#
+            );
+        } else {
+            println!("failed");
+        }
+        r
+    }
     pub fn dump_store(&self) {
         if let Some(store) = &self.store {
             let dir_path = format!(

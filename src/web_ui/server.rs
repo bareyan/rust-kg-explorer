@@ -140,10 +140,22 @@ impl WebServer {
             "/entity" => ("HTTP/1.1 400 BAD REQUEST", Page::Entity("dfa".to_owned())),
             "/routines" => {
                 if let Some(qs) = query_string {
-                    let queries = Self::parse_procedures(
-                        &percent_encoding::percent_decode_str(qs).decode_utf8().unwrap()
-                    );
-                    ("HTTP/1.1 200 OK", Page::Run(queries))
+                    if qs.starts_with("entity") {
+                        let ent = Self::extract_query_param(qs, "entity").unwrap();
+                        let mergeby_param = Self::extract_query_param(qs, "mergeby").unwrap();
+                        let mergeby: Vec<String> = mergeby_param
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .collect();
+                        self.dataset.merge_entities(ent, mergeby);
+                        ("HTTP/1.1 200 OK", Page::Scripts)
+                    } else {
+                        let queries = Self::parse_procedures(
+                            &percent_encoding::percent_decode_str(qs).decode_utf8().unwrap()
+                        );
+
+                        ("HTTP/1.1 200 OK", Page::Run(queries))
+                    }
                 } else {
                     ("HTTP/1.1 200 OK", Page::Scripts)
                 }
