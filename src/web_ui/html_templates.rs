@@ -4,6 +4,8 @@ use std::path::Path;
 use crate::{ named_args, utils::escape_html, web_ui::templetization::Template };
 use crate::web_ui::templetization::include_str;
 
+const NAV: &str = include_str!("../../templates/parts/nav.html");
+
 pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {
     let mut all_cards = String::new();
 
@@ -19,21 +21,26 @@ pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> 
 
     let template = Template::new(
         include_str!("../../templates/index.html"),
-        &["ds_name", "all_cards", "total_cards"]
+        &["nav", "ds_name", "all_cards", "total_cards"]
     );
 
     template.render(
-        named_args!(ds_name = dataset_name, all_cards = &all_cards, total_cards = &total_cards)
+        named_args!(
+            nav = NAV,
+            ds_name = dataset_name,
+            all_cards = &all_cards,
+            total_cards = &total_cards
+        )
     )
 }
 
 pub(crate) fn explore_page(data: &str, navigation: &str) -> String {
     let template = Template::new(
         include_str!("../../templates/explore.html"),
-        &["navigation", "data"]
+        &["nav", "navigation", "data"]
     );
 
-    template.render(named_args!(navigation = navigation, data = data))
+    template.render(named_args!(nav = NAV, navigation = navigation, data = data))
 }
 
 pub(crate) fn query_page(
@@ -43,7 +50,7 @@ pub(crate) fn query_page(
     message: &str
 ) -> String {
     let htmlcode = &include_str("templates/query.html");
-    let html_template = Template::new(htmlcode, &["message", "nb_results", "js"]);
+    let html_template = Template::new(htmlcode, &["nav", "message", "nb_results", "js"]);
 
     let jscode = &include_str("templates/query.js");
     let js_template = Template::new(
@@ -60,9 +67,11 @@ pub(crate) fn query_page(
             api_key = &api_key
         )
     );
-
     let nb_results = &nb_results.to_string();
-    html_template.render(named_args!(message = message, nb_results = nb_results, js = js))
+
+    html_template.render(
+        named_args!(nav = NAV, message = message, nb_results = nb_results, js = js)
+    )
 }
 
 pub(crate) fn entity_page(
@@ -81,6 +90,7 @@ pub(crate) fn entity_page(
     let template = Template::new(
         html,
         &[
+            "nav",
             "image",
             "uri",
             "otype",
@@ -96,6 +106,7 @@ pub(crate) fn entity_page(
 
     template.render(
         named_args!(
+            nav = NAV,
             image = image,
             uri = uri,
             otype = otype,
@@ -113,10 +124,12 @@ pub(crate) fn entity_page(
 pub(crate) fn object_card(name: &str, description: &str, image: &str, id: &str) -> String {
     let template = Template::new(
         include_str!("../../templates/parts/object_card.html"),
-        &["id", "image", "name", "description"]
+        &["nav", "id", "image", "name", "description"]
     );
 
-    template.render(named_args!(id = id, image = image, name = name, description = description))
+    template.render(
+        named_args!(nav = NAV, id = id, image = image, name = name, description = description)
+    )
 }
 
 pub(crate) fn class_card(name: &str, count: u32) -> String {
@@ -124,10 +137,10 @@ pub(crate) fn class_card(name: &str, count: u32) -> String {
     let count = &format!("{count}");
     let template = Template::new(
         include_str!("../../templates/parts/class_card.html"),
-        &["name", "entity_name", "count"]
+        &["nav", "name", "entity_name", "count"]
     );
 
-    template.render(named_args!(name = name, entity_name = entity_name, count = count))
+    template.render(named_args!(nav = NAV, name = name, entity_name = entity_name, count = count))
 }
 
 pub(crate) fn routines_page() -> String {
@@ -143,15 +156,18 @@ pub(crate) fn routines_page() -> String {
             }
         }
     }
-    let template = Template::new(include_str!("../../templates/routines.html"), &["script_cards"]);
+    let template = Template::new(
+        include_str!("../../templates/routines.html"),
+        &["nav", "script_cards"]
+    );
 
-    template.render(named_args!(script_cards = &script_cards))
+    template.render(named_args!(nav = NAV, script_cards = &script_cards))
 }
 
 pub(crate) fn history_page(inside: String) -> String {
-    let template = Template::new(include_str!("../../templates/history.html"), &["inside"]);
+    let template = Template::new(include_str!("../../templates/history.html"), &["nav", "inside"]);
 
-    template.render(named_args!(inside = inside))
+    template.render(named_args!(nav = NAV, inside = inside))
 }
 
 fn script_card(path: &Path, content: &str) -> String {

@@ -9,14 +9,49 @@
     />
   </head>
   <body>
+    [[nav]]
     <div class="container mt-5">
-      <a href="/" class="text-decoration-none"
-        ><h1 class="mb-4 text-center">Routines</h1></a
-      >
-      <div class="d-flex justify-content-center py-5">
-        <a href="/dump" class="btn btn-success">
-          Dump current state to a file
-        </a>
+      <div class="row justify-content-center my-5">
+        <div style="margin-bottom: 20px">
+          <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+              <h3 class="mb-0">Merge Entities</h3>
+            </div>
+            <div class="card-body">
+              <form id="merge" method="get" class="column g-3">
+                <div>
+                  <label for="entityInput" class="form-label"
+                    >Entity Type</label
+                  >
+                  <input
+                    type="text"
+                    name="entity"
+                    id="entityInput"
+                    class="form-control"
+                    placeholder="&lt;http://schema.org/Book&gt;"
+                    required
+                  />
+                </div>
+                <div>
+                  <label for="mergebyInput" class="form-label">Merge by</label>
+                  <input
+                    type="text"
+                    name="mergeby"
+                    id="mergebyInput"
+                    class="form-control"
+                    placeholder="&lt;http://schema.org/name&gt;, &lt;http://schema.org/author&gt;"
+                  />
+                  <div class="form-text">
+                    Separate multiple keys with commas
+                  </div>
+                </div>
+                <div class="col-12 text-end">
+                  <button class="btn btn-primary" type="submit">Merge!</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       </div>
       <form id="sparql-form">
         [[script_cards]]<button type="submit" class="btn btn-primary mt-4">

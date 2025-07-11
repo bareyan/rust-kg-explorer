@@ -8,13 +8,42 @@
       rel="stylesheet"
     />
   </head>
-  <body class="p-4">
-    <div class="container">
-      <a href="/" class="text-decoration-none"
-        ><h1 class="mb-4 text-center">Change History</h1></a
-      >
+  <body>
+    [[nav]]
+    <div class="container p-4">
+      <div class="my-3 d-flex justify-content-center">
+        <input type="file" id="history-file" accept=".txt,.md" />
+        <button class="btn btn-primary" onclick="sendHistoryFile()">
+          Execute from a history file
+        </button>
+      </div>
 
       [[inside]]
     </div>
+    <script>
+      function sendHistoryFile() {
+        const fileInput = document.getElementById("history-file");
+        const file = fileInput.files[0];
+        if (!file) {
+          alert("Please select a history file");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function () {
+          fetch("/replay_history", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+            body: reader.result,
+          }).then((resp) => {
+            if (resp.redirected) {
+              window.location.href = resp.url;
+            } else {
+              window.location.reload();
+            }
+          });
+        };
+        reader.readAsText(file);
+      }
+    </script>
   </body>
 </html>

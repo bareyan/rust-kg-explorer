@@ -162,6 +162,23 @@ impl WebServer {
                 self.dataset.revert(v);
                 ("HTTP/1.1 200 OK", Page::Redirect)
             }
+            "/replay_history" => {
+                let mut content_length = 0;
+
+                for header in request.lines() {
+                    if let Some(cl) = header.strip_prefix("Content-Length:") {
+                        content_length = cl.trim().parse::<usize>().unwrap_or(0);
+                    }
+                }
+                let mut body_buf = vec![0; content_length];
+                reader.read_exact(&mut body_buf).unwrap();
+
+                let payload = String::from_utf8(body_buf).unwrap();
+                if let Err(e) = self.replay_history(payload) {
+                    eprintln!("Error during replay_history: ");
+                }
+                ("HTTP/1.1 200 OK", Page::Redirect)
+            }
             _ => ("HTTP/1.1 404 NOT FOUND", Page::Error),
         };
 
@@ -761,16 +778,31 @@ impl WebServer {
     }
 
     fn generate_history(&self) -> String {
-        let input = include_str(
-            &format!(
-                "./data/{}.db/history.txt",
-                self.dataset.dataset
-                    .to_lowercase()
-                    .split("/")
-                    .last()
-                    .unwrap_or(&self.dataset.dataset)
+        let input = if
+            Path::new(
+                &format!(
+                    "./data/{}.db/history.txt",
+                    self.dataset.dataset
+                        .to_lowercase()
+                        .split("/")
+                        .last()
+                        .unwrap_or(&self.dataset.dataset)
+                )
+            ).exists()
+        {
+            include_str(
+                &format!(
+                    "./data/{}.db/history.txt",
+                    self.dataset.dataset
+                        .to_lowercase()
+                        .split("/")
+                        .last()
+                        .unwrap_or(&self.dataset.dataset)
+                )
             )
-        );
+        } else {
+            String::new()
+        };
         let mut lines = input.lines().map(str::trim);
         let mut inside = String::new();
         let mut sparql_block = String::new();
@@ -839,5 +871,118 @@ impl WebServer {
             }
         }
         history_page(inside)
+    }
+
+    fn replay_history(&self, content: String) -> Result<(), StoreError> {
+        let mut file = std::fs::OpenOptions
+            ::new()
+            .create(true)
+            .append(true)
+            .open(
+                format!(
+                    "./data/{}.db/history.txt",
+                    self.dataset.dataset
+                        .to_lowercase()
+                        .split("/")
+                        .last()
+                        .unwrap_or(&self.dataset.dataset)
+                )
+            )
+            .unwrap();
+
+        let mut lines = content.lines().map(str::trim);
+        let mut in_sparql = false;
+        let mut sparql_block = String::new();
+
+        for line in lines {
+            if line.starts_with("```sparql") {
+                in_sparql = true;
+                sparql_block.clear();
+            } else if line.starts_with("```") && in_sparql {
+                in_sparql = false;
+                // Execute the SPARQL block
+                if sparql_block.contains("#\n") {
+                    // Advanced query with select and update parts
+                    let parts: Vec<&str> = sparql_block.split("#\n").collect();
+                    if parts.len() == 2 {
+                        let (select_query, update_query) = (parts[0].trim(), parts[1].trim());
+                        self.dataset.iterative_update(select_query, update_query)?;
+                    } else {
+                        // Fallback to regular update if format is unexpected
+                        self.dataset.update(&sparql_block)?;
+                    }
+                } else {
+                    // Regular SPARQL update
+                    self.dataset.update(&sparql_block)?;
+                }
+            } else if in_sparql {
+                sparql_block.push_str(line);
+                sparql_block.push('\n');
+            } else if line.contains("::") && !line.starts_with("Dumping") {
+                // This is a routine execution line
+                let (file, proc) = line.split_once("::").unwrap();
+                let path = Path::new("routines").join(file);
+
+                if let Ok(routine_content) = read_to_string(&path) {
+                    let mut current_name = String::new();
+                    let mut current_query = String::new();
+                    let mut in_proc = false;
+                    let mut is_advanced = false;
+
+                    for routine_line in routine_content.lines() {
+                        if routine_line.starts_with("##") {
+                            if in_proc && current_name == proc {
+                                // Execute the found procedure
+                                if is_advanced {
+                                    let parts: Vec<&str> = current_query.split("#\n").collect();
+                                    if parts.len() == 2 {
+                                        let (select_query, update_query) = (
+                                            parts[0].trim(),
+                                            parts[1].trim(),
+                                        );
+                                        self.dataset.iterative_update(select_query, update_query)?;
+                                    } else {
+                                        self.dataset.update(&current_query)?;
+                                    }
+                                } else {
+                                    self.dataset.update(&current_query)?;
+                                }
+                                break;
+                            }
+                            is_advanced = routine_line.ends_with("@advanced");
+                            current_name = routine_line.trim_start_matches("##").trim().to_string();
+                            current_query.clear();
+                            in_proc = true;
+                        } else if in_proc {
+                            current_query.push_str(routine_line);
+                            current_query.push('\n');
+                        }
+                    }
+
+                    // Handle case where procedure is at the end of file
+                    if in_proc && current_name == proc {
+                        if is_advanced {
+                            let parts: Vec<&str> = current_query.split("#\n").collect();
+                            if parts.len() == 2 {
+                                let (select_query, update_query) = (
+                                    parts[0].trim(),
+                                    parts[1].trim(),
+                                );
+                                self.dataset.iterative_update(select_query, update_query)?;
+                            } else {
+                                self.dataset.update(&current_query)?;
+                            }
+                        } else {
+                            self.dataset.update(&current_query)?;
+                        }
+                    }
+                }
+            }
+            if !line.starts_with("Dumping") {
+                let _ = writeln!(file, "{}", line);
+            }
+        }
+
+        Ok(())
     }
 }
