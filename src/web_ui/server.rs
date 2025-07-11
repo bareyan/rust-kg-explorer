@@ -1,6 +1,6 @@
 use std::collections::{ HashMap, HashSet };
 use std::fs::{ read_to_string, File };
-use std::io::prelude::*;
+use std::io::{ prelude::*, BufReader };
 use std::net::{ TcpListener, TcpStream };
 use std::path::Path;
 use std::sync::Arc;
@@ -66,11 +66,18 @@ impl WebServer {
 
     fn handle_connection(&self, mut stream: TcpStream) {
         let mut buffer = [0; 1024];
-        if stream.read(&mut buffer).is_err() {
-            return;
-        }
+        let mut reader = BufReader::new(&mut stream);
+        let mut request = String::new();
 
-        let request = String::from_utf8_lossy(&buffer);
+        loop {
+            let mut line = String::new();
+            let bytes_read = reader.read_line(&mut line).unwrap();
+            if bytes_read == 0 || line == "\r\n" {
+                break;
+            }
+            request.push_str(&line);
+        }
+        // let request = String::from_utf8_lossy(&buffer);
         let first_line = request.lines().next().unwrap_or("");
 
         let full_path = first_line.split_whitespace().nth(1).unwrap_or("/");
@@ -184,7 +191,7 @@ impl WebServer {
         };
 
         let response = format!(
-            "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
+            "{status_line}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             contents.len(),
             contents
         );
@@ -199,7 +206,7 @@ impl WebServer {
             let k = parts.next()?;
             let v = parts.next()?;
             if k == key {
-                return Some(v.replace("+", " ").replace("%20", " "));
+                return Some(v.replace("+", " ").replace("%20", " ").replace("%23", ""));
             }
         }
         None
@@ -276,7 +283,6 @@ impl WebServer {
         let mut headers = vec![];
         let mut message = "Query successfully executed".to_string();
         let mut message_type = "success";
-
         if !q.is_empty() {
             match mode {
                 "query" => {
@@ -332,7 +338,16 @@ impl WebServer {
                                     ::new()
                                     .create(true)
                                     .append(true)
-                                    .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                                    .open(
+                                        format!(
+                                            "./data/{}.db/history.txt",
+                                            self.dataset.dataset
+                                                .to_lowercase()
+                                                .split("/")
+                                                .last()
+                                                .unwrap_or(&self.dataset.dataset)
+                                        )
+                                    )
                             {
                                 let _ = writeln!(file, "```sparql\n{}\n```", q);
                             }
@@ -352,7 +367,16 @@ impl WebServer {
                                     ::new()
                                     .create(true)
                                     .append(true)
-                                    .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                                    .open(
+                                        format!(
+                                            "./data/{}.db/history.txt",
+                                            self.dataset.dataset
+                                                .to_lowercase()
+                                                .split("/")
+                                                .last()
+                                                .unwrap_or(&self.dataset.dataset)
+                                        )
+                                    )
                             {
                                 let _ = writeln!(file, "```sparql\n{}\n#\n{}\n```", sq.unwrap(), q);
                             }
@@ -516,7 +540,6 @@ impl WebServer {
             }
             items.remove(0);
         }
-        // println!("{jsons}");
         for (s, t, l) in connections {
             cons += &format!("{{source: \"{}\", target: \"{}\", label: \"{}\"}},", s, t, l);
         }
@@ -569,9 +592,20 @@ impl WebServer {
                             ::new()
                             .create(true)
                             .append(true)
-                            .open(format!("./data/{}/history.txt", self.dataset.dataset))
+                            .open(
+                                format!(
+                                    "./data/{}.db/history.txt",
+                                    self.dataset.dataset
+                                        .to_lowercase()
+                                        .split("/")
+                                        .last()
+                                        .unwrap_or(&self.dataset.dataset)
+                                )
+                            )
                     {
                         let _ = writeln!(file, "{}", script_name);
+                    } else {
+                        println!("failed");
                     }
                 }
                 Err(StoreError::EvaluationError(ee)) => {
@@ -727,7 +761,16 @@ impl WebServer {
     }
 
     fn generate_history(&self) -> String {
-        let input = include_str(&format!("./data/{}/history.txt", self.dataset.dataset));
+        let input = include_str(
+            &format!(
+                "./data/{}.db/history.txt",
+                self.dataset.dataset
+                    .to_lowercase()
+                    .split("/")
+                    .last()
+                    .unwrap_or(&self.dataset.dataset)
+            )
+        );
         let mut lines = input.lines().map(str::trim);
         let mut inside = String::new();
         let mut sparql_block = String::new();
@@ -778,7 +821,17 @@ impl WebServer {
         </div>"#,
                         line.replace("Dumping store to", ""),
                         line.replace(
-                            &format!("Dumping store to ./data/{}/", self.dataset.dataset),
+                            &format!(
+                                "Dumping store to ./data/{}/",
+                                self.dataset.dataset
+                                    .split("/")
+                                    .last()
+                                    .unwrap_or(&self.dataset.dataset)
+                                    .replace(".nt", "")
+                                    .replace(".ttl", "")
+                                    .replace(".db", "")
+                                    .replace(".nq", "")
+                            ),
                             ""
                         )
                     )

@@ -1,0 +1,86 @@
+### General routines applicable to all of the datasets
+
+## Translate all predicates to lowercase
+DELETE {?s  ?p ?o }
+INSERT {?s ?p_lower ?o}
+WHERE {
+  ?s ?p ?o .
+  BIND(IRI(LCASE(STR(?p))) AS ?p_lower)
+}
+
+## Replace https://schema.org/ to http://schema.org/
+DELETE{
+    ?s ?p ?o .
+}
+INSERT {
+    ?s ?p_new ?o.
+}
+WHERE {
+    	?s ?p ?o .
+    	BIND(URI(REPLACE(STR(?p), "https://schema.org/", "http://schema.org/")) AS ?p_new).
+	FILTER(STRSTARTS(STR(?p), "https://schema.org/" ))
+};
+DELETE{
+    ?s ?p ?o .
+}
+INSERT {
+    ?s ?p ?o_new.
+}
+WHERE {
+    	?s ?p ?o .
+    	BIND(URI(REPLACE(STR(?o), "https://schema.org/", "http://schema.org/")) AS ?o_new).
+	FILTER(STRSTARTS(STR(?o), "https://schema.org/" ))
+}
+
+## Remove empty strings used as object literals
+DELETE
+	{?s ?p ?o}
+WHERE {
+  ?s ?p ?o .
+FILTER ( isLiteral(?o) &&
+    (STRLEN(STR(?o)) = 0 || REGEX(STR(?o), "^[\\s]*$"))
+  )
+}
+
+## Remove entities that figure only in one tripple as subject
+PREFIX schema: <http://schema.org/>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+DELETE {
+	?s ?p ?sub .
+}
+WHERE {
+	?s ?p ?sub .
+	?sub a ?type .
+	FILTER NOT EXISTS {
+		?sub ?pred ?o .
+		FILTER(?pred != rdf:type)
+	}
+};
+DELETE {
+	?sub a ?type .
+}
+WHERE {
+	?sub a ?type .
+	FILTER NOT EXISTS {
+		?sub ?pred ?o .
+		FILTER(?pred != rdf:type)
+	}
+}
+
+## Merge geocoordinates@advanced
+
+SELECT ?s1 ?s2 WHERE {
+	?s1 <http://schema.org/latitude> ?lat.
+	?s1 <http://schema.org/longitude> ?lon.
+	?s2 <http://schema.org/latitude> ?lat.
+	?s2 <http://schema.org/longitude> ?lon.
+	FILTER(STR(?s1) < STR(?s2))
+}
+#
+DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }

@@ -95,3 +95,45 @@ WHERE {
         ?url ?p ?o.
     }
 };
+
+
+## Delete all of the images
+
+DELETE {
+    ?s <http://schema.org/image> ?image.
+}
+WHERE {
+     ?s <http://schema.org/image> ?image.
+};
+
+DELETE {
+    ?s <http://schema.org/photo> ?image.
+}
+WHERE {
+     ?s <http://schema.org/photo> ?image.
+};
+
+DELETE {
+    ?s <http://schema.org/logo> ?image.
+}
+WHERE {
+     ?s <http://schema.org/logo> ?image.
+};
+
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/ImageObject>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/ImageObject>.
+    ?s ?p ?o.
+}
+
+

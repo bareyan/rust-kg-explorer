@@ -508,7 +508,21 @@ impl KG {
 
     pub fn dump_store(&self) {
         if let Some(store) = &self.store {
-            let dir_path = format!("./data/{}/", self.dataset);
+            let dir_path = format!(
+                "./data/{}/",
+                self.dataset
+                    .split("/")
+                    .last()
+                    .unwrap_or(&self.dataset)
+                    .replace(".nt", "")
+                    .replace(".ttl", "")
+                    .replace(".db", "")
+                    .replace(".nq", "")
+            );
+
+            if !Path::new(&dir_path).is_dir() {
+                std::fs::create_dir_all(&dir_path).expect("Failed to create directory");
+            }
 
             let mut version = 1;
             loop {
@@ -528,7 +542,12 @@ impl KG {
                     ::new()
                     .create(true)
                     .append(true)
-                    .open(format!("./data/{}/history.txt", self.dataset))
+                    .open(
+                        format!(
+                            "./data/{}.db/history.txt",
+                            self.dataset.to_lowercase().split("/").last().unwrap_or(&self.dataset)
+                        )
+                    )
             {
                 let _ = writeln!(file, "Dumping store to {}", file_path);
             }
@@ -548,8 +567,12 @@ impl KG {
 
     pub fn revert(&self, version: u32) {
         if let Some(store) = &self.store {
+            let dataset = self.dataset.split("/").last().unwrap_or(&self.dataset);
             store.clear();
-            let dir_path = format!("./data/{}/", self.dataset);
+            let dir_path = format!(
+                "./data/{}/",
+                dataset.replace(".nt", "").replace(".ttl", "").replace(".db", "").replace(".nq", "")
+            );
 
             let file_path = format!("{}version_{}.nt", dir_path, version);
             let parser = File::open(file_path).unwrap();
@@ -559,11 +582,15 @@ impl KG {
                 .load_from_reader(RdfParser::from_format(RdfFormat::NTriples), parser)
                 .expect("Failed to load file");
 
-            let history_path = format!("./data/{}/history.txt", self.dataset);
+            let history_path = format!("./data/{}.db/history.txt", dataset.to_lowercase());
             if let Ok(content) = std::fs::read_to_string(&history_path) {
                 let target_line = format!(
                     "Dumping store to ./data/{}/version_{}.nt",
-                    self.dataset,
+                    dataset
+                        .replace(".nt", "")
+                        .replace(".ttl", "")
+                        .replace(".db", "")
+                        .replace(".nq", ""),
                     version
                 );
                 if let Some(pos) = content.find(&target_line) {

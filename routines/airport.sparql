@@ -1,0 +1,31 @@
+### Routines for cleaning up the airport kg
+
+## Merge using the iata code, assign a new IRI
+DELETE {
+  ?sub ?p ?s
+}
+INSERT {
+  ?sub ?p ?newIRI
+}
+WHERE {
+    ?s <http://schema.org/iatacode> ?iata .
+    ?sub ?p ?s .
+    FILTER (strstarts(str(?s), "urn:skolem")) .
+    BIND(IRI(CONCAT("urn:iata:", STR(?iata))) AS ?newIRI)
+};
+
+DELETE {
+  ?s ?p ?o
+}
+INSERT {
+  ?newIRI ?p ?o
+}
+WHERE {
+  ?s <http://schema.org/iatacode> ?iata .
+  ?s ?p ?o .
+  FILTER (strstarts(str(?s), "urn:skolem")) 
+  FILTER (?iata!="N/A" && ?iata!="")
+  BIND(IRI(CONCAT("urn:iata:", STR(?iata))) AS ?newIRI)
+}
+
+## 

@@ -110,13 +110,14 @@ secondary.addEventListener("keydown", function (e) {
 
 document.getElementById("queryForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  const encodedQuery = encodeURIComponent(
-    textarea.value.replaceAll("#", "%23")
+  const encodedQuery = encodeURIComponent(textarea.value).replaceAll(
+    "#",
+    "%23"
   );
   const secondaryQuery =
     modeInput.value === "advanced"
       ? "&secondary=" +
-        encodeURIComponent(secondary.value.replaceAll("#", "%23"))
+        encodeURIComponent(secondary.value).replaceAll("#", "%23")
       : "";
   // console.log;
   const encodedMode = encodeURIComponent(modeInput.value);
@@ -391,6 +392,8 @@ async function generateSPARQLQuery(input) {
   * Understand natural language descriptions of data retrieval needs.
   * Correct and complete incomplete or erroneous SPARQL queries.
   * Provide only the functional SPARQL query as a response, without any additional text, explanations, or conversational elements.
+  * Work only with select, delete, insert queries, no construct queries
+  * There are no named graphs
   
   Behaviors and Rules:
   

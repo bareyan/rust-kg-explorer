@@ -62,7 +62,6 @@ pub(crate) fn query_page(
     );
 
     let nb_results = &nb_results.to_string();
-
     html_template.render(named_args!(message = message, nb_results = nb_results, js = js))
 }
 
