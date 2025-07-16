@@ -1,14 +1,41 @@
+//! Utility module for RDF data processing and web interface formatting.
+//!
+//! This module provides functions for:
+//! - Preprocessing N-Quads files into N-Triples format
+//! - Converting blank nodes to skolemized IRIs
+//! - Extracting values from RDF terms
+//! - HTML and JavaScript escaping for web output
+//! - Creating hyperlinks from RDF resources
+//! - Formatting query results as JSON for visualization
+//! - URL decoding for web parameters
+
 use std::fs::File;
-use std::io::{ BufWriter, Write };
+use std::io::{ BufWriter, Write, BufReader, BufRead };
+use regex::{ Match, Regex };
+
+// Oxigraph
 use oxigraph::model::{ Term };
 use oxigraph::model::Term::{ NamedNode, Literal };
 use oxigraph::sparql::{ QuerySolution };
 
-use regex::{ Match, Regex };
-use url::Url;
-use std::io::{ BufRead, BufReader };
-
-pub(crate) fn preprocess(nquads_file: &str) {
+/// Preprocesses an N-Quads file by performing a series of normalization and cleanup steps:
+/// - Removes invalid Unicode replacement characters and standardizes schema.org IRIs.
+/// - Converts inline JSON‐LD constructs wrapped in `<…{…}…>` into quoted literals.
+/// - Rewrites `<@type:>` tokens to the standard RDF type IRI.
+/// - Strips named graph annotations, ending each triple with a simple `.`.
+/// - Skolemizes blank node labels into unique IRIs.
+/// - Writes each cleaned line into a new `.nt` file with the same base name.
+///
+/// # Arguments
+///
+/// * `nquads_file` – Path to the input N-Quads file. The output will be saved as
+///   `{nquads_file}.nt`.
+///
+/// # Panics
+///
+/// This function will panic if the input file cannot be opened, the output file cannot
+/// be created, or if any I/O error occurs during processing.
+pub fn preprocess(nquads_file: &str) {
     let infile = File::open(nquads_file).unwrap();
     let outfile = File::create(format!("{}.nt", nquads_file)).unwrap();
 
@@ -62,11 +89,29 @@ pub(crate) fn preprocess(nquads_file: &str) {
     }
 }
 
+/// Skolemizes a blank node identifier into a URN‐style IRI.
+///
+/// # Arguments
+///
+/// * `blank_node` – The blank node label (e.g. `_:b0`).
+///
+/// # Returns
+///
+/// A string containing a skolem IRI (e.g. `<urn:skolem:b0>`).
 pub fn skolemize(blank_node: String) -> String {
     return format!("<{}>", blank_node.replace("_", "urn:skolem"));
 }
 
-pub(crate) fn extract_literal(term: Option<&Term>) -> Option<String> {
+/// Extracts the string value from an `Option<&Term>`, handling literals and named nodes.
+///
+/// # Arguments
+///
+/// * `term` – An optional reference to an Oxigraph `Term`.
+///
+/// # Returns
+///
+/// * `Some(String)` with the literal value or IRI (angle brackets stripped), or `None` for other term types or `None` input.
+pub fn extract_literal(term: Option<&Term>) -> Option<String> {
     match term {
         Some(t) => {
             match t {
@@ -79,14 +124,95 @@ pub(crate) fn extract_literal(term: Option<&Term>) -> Option<String> {
     }
 }
 
+/// Decodes a percent-encoded string, converting `+` to space and `%HH` to their byte value.
+///
+/// # Arguments
+///
+/// * `input` – The percent-encoded input string.
+///
+/// # Returns
+///
+/// The decoded `String`.
+pub fn url_decode(input: &str) -> String {
+    let mut result = String::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '+' => result.push(' '),
+            '%' => {
+                if let (Some(h1), Some(h2)) = (chars.next(), chars.next()) {
+                    let hex = format!("{}{}", h1, h2);
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                        result.push(byte as char);
+                    }
+                }
+            }
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
+
+/// Retrieves a query parameter value from a URL-encoded query string.
+///
+/// # Arguments
+///
+/// * `query` – The raw query string (e.g. `"a=1&b=2"`).
+/// * `key` – The parameter name to extract.
+///
+/// # Returns
+///
+/// * `Some(String)` of the decoded parameter value, or `None` if the key is not present.
+pub fn extract_query_param(query: &str, key: &str) -> Option<String> {
+    for pair in query.split('&') {
+        let p = percent_encoding::percent_decode_str(pair).decode_utf8().unwrap().to_string();
+        let mut parts = p.splitn(2, '=');
+        let k = parts.next()?;
+        let v = parts.next()?;
+        if k == key {
+            return Some(v.replace("+", " ").replace("%20", " ").replace("%23", ""));
+        }
+    }
+    None
+}
+
+/// Escapes HTML-special characters in a string to their entity equivalents.
+///
+/// # Arguments
+///
+/// * `data` – The input string to escape.
+///
+/// # Returns
+///
+/// The escaped HTML string.
 pub fn escape_html(data: &String) -> String {
     data.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 
+/// Escapes characters in a string for safe embedding in JavaScript.
+///
+/// # Arguments
+///
+/// * `data` – The input string to escape.
+///
+/// # Returns
+///
+/// The escaped JavaScript string.
 pub fn escape_js(data: String) -> String {
     data.replace("'", "\\'").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")
 }
 
+/// Renders an internal entity IRI as an HTML link to the entities page.
+///
+/// # Arguments
+///
+/// * `data` – A string containing an encoded IRI (e.g. `&lt;http://…&gt;`).
+///
+/// # Returns
+///
+/// An `<a>` tag linking to `/entity/{IRI}` or the original data if not an IRI.
 pub fn to_link(data: String) -> String {
     if data.starts_with("&lt;") && data.ends_with("&gt;") {
         let link = data.replace("&lt;", "/entity/<").replace("&gt;", ">").replace("#", "%23");
@@ -96,18 +222,16 @@ pub fn to_link(data: String) -> String {
     }
 }
 
-pub fn schema_link(data: String) -> String {
-    if data.starts_with("&lt;http://schema.org/") && data.ends_with("&gt;") {
-        let link = data.replace("&lt;", "/explore?id=<").replace("&gt;", ">");
-        format!("<a href=\"{}\">{}</a>", link, data)
-    } else {
-        data
-    }
-}
-
-pub fn linkify(data: &str) -> String {
-    // let d = data.replace(")
-    // println!("{data}");
+/// Renders any IRI as an external HTML link, escaping HTML characters.
+///
+/// # Arguments
+///
+/// * `data` – A string possibly containing `<http…>`.
+///
+/// # Returns
+///
+/// An `<a>` tag linking to the external resource, or the escaped input if not an IRI.
+pub fn external_link(data: &str) -> String {
     if data.starts_with("<http") {
         let d = data.replace("<", "").replace(">", "");
         return format!("<a href=\"{d}\">{}</a>", escape_html(&data.to_string()));
@@ -115,10 +239,16 @@ pub fn linkify(data: &str) -> String {
     escape_html(&data.to_string())
 }
 
-pub fn verify_valid(uri: &String) -> bool {
-    Url::parse(&uri).is_ok()
-}
-
+/// Formats a list of SPARQL query solutions for a given entity into a JSON‐compatible string.
+///
+/// # Arguments
+///
+/// * `entity` – The entity IRI to describe.
+/// * `props` – A vector of `QuerySolution` objects with `predicate` and `object` bindings.
+///
+/// # Returns
+///
+/// A string containing a JSON fragment with id, name, optional image, URL, and attribute pairs.
 pub fn format_json(entity: String, props: Vec<QuerySolution>) -> String {
     let mut name = entity.clone();
     let mut inside = String::new();
@@ -173,26 +303,4 @@ pub fn format_json(entity: String, props: Vec<QuerySolution>) -> String {
     
     "#
     )
-}
-
-pub fn url_decode(input: &str) -> String {
-    let mut result = String::new();
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        match c {
-            '+' => result.push(' '),
-            '%' => {
-                if let (Some(h1), Some(h2)) = (chars.next(), chars.next()) {
-                    let hex = format!("{}{}", h1, h2);
-                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                        result.push(byte as char);
-                    }
-                }
-            }
-            _ => result.push(c),
-        }
-    }
-
-    result
 }

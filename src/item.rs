@@ -8,7 +8,21 @@ pub struct Item {
     pub description: Option<String>,
     pub images: Vec<String>,
 }
+
 impl Item {
+    /// Creates a new `Item`.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` – The RDF `Term` representing this item (named node or blank node).
+    /// * `types` – A vector of RDF `Term`s indicating the entity types of this item.
+    /// * `name` – An optional human-readable name for this item.
+    /// * `description` – An optional textual description for this item.
+    /// * `imgs` – A list of image URLs associated with this item.
+    ///
+    /// # Returns
+    ///
+    /// A fully initialized `Item` containing the provided node, types, name, description, and images.
     pub fn new(
         node: Term,
         types: Vec<Term>,
@@ -24,19 +38,22 @@ impl Item {
             images: imgs,
         }
     }
-    // pub fn empty(node: Term) -> Item{
-    //     Item {
-    //         node: node,
-    //         entity_types: vec![],
-    //         name: None,
-    //         description: None,
-    //         images: vec![]
-    //     }
-    // }
-    pub fn _print(&self) {
-        println!("{}", self);
-    }
 
+    /// Generates an HTML representation of the `Item`.
+    ///
+    /// This method:
+    /// - Selects the first image URL or uses an empty string if none are provided.
+    /// - Uses the item’s `name` or defaults to `"Unknown"`.
+    /// - Uses the item’s `description` or defaults to `"No description available"`.
+    /// - Extracts the underlying node identifier, URL‐encodes any `#` characters, and embeds it in an object card.
+    ///
+    /// # Returns
+    ///
+    /// A `String` containing the HTML snippet for the item’s object card.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying `Term` is a literal or triple, as only named and blank nodes are valid item identifiers.
     pub fn html_rep(&self) -> String {
         let image = self.images.first().map(String::as_str).unwrap_or("").to_string();
         let name = self.name.as_deref().unwrap_or("Unknown").to_string();
@@ -44,7 +61,6 @@ impl Item {
             .as_deref()
             .unwrap_or("No description available")
             .to_string();
-        // no unnecessary clones
 
         let id = match &self.node {
             Term::NamedNode(named_node) => named_node.as_str(),
@@ -55,6 +71,7 @@ impl Item {
         object_card(&name, &description, &image, &id.replace("#", "%23"))
     }
 }
+
 impl From<&Item> for String {
     fn from(value: &Item) -> Self {
         format!(

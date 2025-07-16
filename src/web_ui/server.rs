@@ -1,15 +1,25 @@
+use core::option::Option::None;
 use std::collections::{ HashMap, HashSet };
-use std::fs::{ read_to_string, File };
+use std::fs::read_to_string;
 use std::io::{ prelude::*, BufReader };
 use std::net::{ TcpListener, TcpStream };
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
+use oxigraph::model::Term::Literal;
+
 use crate::store::KG;
-use crate::utils::{ escape_html, format_json, linkify, schema_link, to_link, url_decode };
+use crate::utils::{
+    extract_query_param,
+    escape_html,
+    format_json,
+    external_link,
+    to_link,
+    url_decode,
+};
 use crate::web_ui::html_templates::{
-    self,
+    explore_page,
     entity_page,
     history_page,
     index_page,
@@ -17,7 +27,7 @@ use crate::web_ui::html_templates::{
     routines_page,
 };
 use crate::store::StoreError;
-use crate::web_ui::templetization::include_str;
+
 enum Page {
     Index,
     Explore(String, u32),
@@ -41,7 +51,7 @@ impl WebServer {
         WebServer { dataset: kg, port }
     }
 
-    pub(crate) fn serve(&self) {
+    pub fn serve(&self) {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port)).unwrap();
         println!("Listening on http://127.0.0.1:{}", self.port);
 
@@ -65,7 +75,6 @@ impl WebServer {
     }
 
     fn handle_connection(&self, mut stream: TcpStream) {
-        let mut buffer = [0; 1024];
         let mut reader = BufReader::new(&mut stream);
         let mut request = String::new();
 
@@ -77,59 +86,55 @@ impl WebServer {
             }
             request.push_str(&line);
         }
-        // let request = String::from_utf8_lossy(&buffer);
+
         let first_line = request.lines().next().unwrap_or("");
 
         let full_path = first_line.split_whitespace().nth(1).unwrap_or("/");
 
         let (route, query_string) = match full_path.split_once('?') {
             Some((r, q)) => (r, Some(q)),
-            None => (full_path, None),
+            _ => (full_path, None),
         };
         println!("{}", first_line);
+
         let (status_line, page) = match route {
             "/" => ("HTTP/1.1 200 OK", Page::Index),
-            "/query" => {
-                if let Some(qs) = query_string {
-                    // let q = percent_encoding::percent_decode_str(qs).decode_utf8().unwrap().to_string();
-                    (
-                        "HTTP/1.1 200 OK",
-                        Page::Query(
-                            Self::extract_query_param(qs, "query"),
-                            Self::extract_query_param(qs, "mode"),
-                            Self::extract_query_param(qs, "secondary")
-                        ),
-                    )
-                } else {
-                    (
-                        "HTTP/1.1 200 OK",
-                        Page::Query(Self::extract_query_param("", "query"), None, None),
-                    )
-                }
-            }
-            "/explore" => {
-                if let Some(qs) = query_string {
-                    if let Some(id) = Self::extract_query_param(qs, "id") {
-                        let page: u32 = match
-                            Self::extract_query_param(qs, "page").unwrap_or("1".to_string()).parse()
-                        {
-                            Ok(num) => num,
-                            Err(_) => 1,
-                        };
-                        ("HTTP/1.1 200 OK", Page::Explore(id, page))
-                    } else {
-                        ("HTTP/1.1 400 BAD REQUEST", Page::Error)
+            "/query" =>
+                match query_string {
+                    Some(qs) => {
+                        (
+                            "HTTP/1.1 200 OK",
+                            Page::Query(
+                                extract_query_param(qs, "query"),
+                                extract_query_param(qs, "mode"),
+                                extract_query_param(qs, "secondary")
+                            ),
+                        )
                     }
-                } else {
-                    ("HTTP/1.1 400 BAD REQUEST", Page::Error)
+                    None => ("HTTP/1.1 200 OK", Page::Query(None, None, None)),
                 }
-            }
+            "/explore" =>
+                match query_string {
+                    Some(qs) =>
+                        match extract_query_param(qs, "id") {
+                            Some(id) => {
+                                let page: u32 = match
+                                    extract_query_param(qs, "page")
+                                        .unwrap_or("1".to_string())
+                                        .parse()
+                                {
+                                    Ok(num) => num,
+                                    Err(_) => 1,
+                                };
+                                ("HTTP/1.1 200 OK", Page::Explore(id, page))
+                            }
+                            None => ("HTTP/1.1 400 BAD REQUEST", Page::Error),
+                        }
+                    None => ("HTTP/1.1 400 BAD REQUEST", Page::Error),
+                }
+
             route if route.starts_with("/entity/") => {
-                let fp = percent_encoding
-                    ::percent_decode_str(full_path)
-                    .decode_utf8()
-                    .unwrap()
-                    .to_string();
+                let fp = url_decode(full_path);
                 let entity_name = &fp["/entity/".len()..];
 
                 (
@@ -137,22 +142,21 @@ impl WebServer {
                     Page::Entity(entity_name.to_string().replace("%3C", "<").replace("%3E", ">")),
                 )
             }
-            "/entity" => ("HTTP/1.1 400 BAD REQUEST", Page::Entity("dfa".to_owned())),
             "/routines" => {
                 if let Some(qs) = query_string {
                     if qs.starts_with("entity") {
-                        let ent = Self::extract_query_param(qs, "entity").unwrap();
-                        let mergeby_param = Self::extract_query_param(qs, "mergeby").unwrap();
+                        let ent = extract_query_param(qs, "entity").unwrap();
+                        let mergeby_param = extract_query_param(qs, "mergeby").unwrap();
                         let mergeby: Vec<String> = mergeby_param
                             .split(',')
                             .map(|s| s.trim().to_string())
                             .collect();
-                        self.dataset.merge_entities(ent, mergeby);
-                        ("HTTP/1.1 200 OK", Page::Scripts)
+                        match self.dataset.merge_entities(ent, mergeby) {
+                            Ok(()) => ("HTTP/1.1 200 OK", Page::Scripts),
+                            Err(_) => ("HTTP/1.1 400 ERROR", Page::Error),
+                        }
                     } else {
-                        let queries = Self::parse_procedures(
-                            &percent_encoding::percent_decode_str(qs).decode_utf8().unwrap()
-                        );
+                        let queries = Self::parse_procedures(qs);
 
                         ("HTTP/1.1 200 OK", Page::Run(queries))
                     }
@@ -186,8 +190,8 @@ impl WebServer {
                 reader.read_exact(&mut body_buf).unwrap();
 
                 let payload = String::from_utf8(body_buf).unwrap();
-                if let Err(e) = self.replay_history(payload) {
-                    eprintln!("Error during replay_history: ");
+                if let Err(_) = self.dataset.replay_history(payload) {
+                    eprintln!("Error during replay_history");
                 }
                 ("HTTP/1.1 200 OK", Page::Redirect)
             }
@@ -203,20 +207,9 @@ impl WebServer {
             Page::Entity(uri) => self.generate_entity(&uri),
             Page::Scripts => self.generate_scripts(),
             Page::Run(scripts) => self.generate_run_results(scripts),
-            Page::Error => self.generate_error(),
-            Page::Redirect => {
-                r#"<!DOCTYPE html>
-<html>
-  <head>
-    <meta http-equiv="refresh" content="0; url=/" />
-    <title>Redirecting...</title>
-  </head>
-  <body>
-    <p>If you are not redirected automatically, <a href="/">click here</a>.</p>
-  </body>
-</html>"#.to_string()
-            }
-            Page::History => { self.generate_history() }
+            Page::Error => "<html><body><h1>404 - Page Not Found</h1></body></html>".to_string(),
+            Page::Redirect => include_str!("../../templates/redirect.html").to_string(),
+            Page::History => self.generate_history(),
         };
 
         let response = format!(
@@ -228,28 +221,16 @@ impl WebServer {
         let _ = stream.write_all(response.as_bytes());
     }
 
-    fn extract_query_param(query: &str, key: &str) -> Option<String> {
-        for pair in query.split('&') {
-            let p = percent_encoding::percent_decode_str(pair).decode_utf8().unwrap().to_string();
-            let mut parts = p.splitn(2, '=');
-            let k = parts.next()?;
-            let v = parts.next()?;
-            if k == key {
-                return Some(v.replace("+", " ").replace("%20", " ").replace("%23", ""));
-            }
-        }
-        None
-    }
-
     fn generate_index(&self) -> String {
         let q =
-            r#"SELECT ?t (COUNT(?s) AS ?count)
-    WHERE {
-      ?s a ?t .
-    }
-    GROUP BY ?t
-    ORDER BY DESC(?count)
-    "#;
+            r#"
+SELECT ?t (COUNT(?s) AS ?count)
+WHERE {
+    ?s a ?t .
+}
+GROUP BY ?t
+ORDER BY DESC(?count)
+"#;
 
         let mut class_counts = vec![];
 
@@ -259,8 +240,7 @@ impl WebServer {
                 for r in result {
                     let class = r.get("t").unwrap().to_string();
                     let cnt = match r.get("count").unwrap() {
-                        oxigraph::model::Term::Literal(literal) =>
-                            literal.value().parse::<u32>().unwrap(),
+                        Literal(literal) => literal.value().parse::<u32>().unwrap(),
                         _ => 0,
                     };
                     class_counts.push((class, cnt));
@@ -269,7 +249,7 @@ impl WebServer {
             Err(_) => panic!("SPARQL query failed"),
         }
 
-        index_page(&self.dataset.dataset, &class_counts)
+        index_page(&self.dataset.get_name(), &class_counts)
     }
 
     fn generate_explore(&self, id: &str, page_num: u32) -> String {
@@ -278,33 +258,13 @@ impl WebServer {
             50,
             (page_num - 1) * 50
         );
-        let mut page = String::new();
+        let data = objs
+            .iter()
+            .map(|o| self.dataset.get_details(&o.to_string()).html_rep())
+            .collect::<Vec<String>>()
+            .join("");
 
-        for o in objs {
-            page += &self.dataset.get_info(o).html_rep();
-        }
-        let mut navigation = String::new();
-
-        navigation += r#"<div class="d-flex justify-content-between gap-2 mt-4">"#;
-
-        // Previous button
-        if page_num > 1 {
-            navigation += &format!(
-                r#"<a class="btn btn-outline-primary" href="/explore?id={id}&page={}">Previous</a>"#,
-                page_num - 1
-            );
-        } else {
-            navigation += r#"<button class="btn btn-outline-secondary" disabled>Previous</button>"#;
-        }
-        navigation += &format!("<p>Page {page_num}</p>");
-        // Next button
-        navigation += &format!(
-            r#"<a class="btn btn-outline-primary" href="/explore?id={id}&page={}">Next</a>"#,
-            page_num + 1
-        );
-
-        navigation += "</div>";
-        html_templates::explore_page(&page, &navigation)
+        explore_page(id, page_num, &data)
     }
 
     fn generate_query(&self, q: &str, mode: &str, sq: Option<String>) -> String {
@@ -362,24 +322,7 @@ impl WebServer {
                     let query_result = self.dataset.update(q);
                     match query_result {
                         Ok(()) => {
-                            if
-                                let Ok(mut file) = std::fs::OpenOptions
-                                    ::new()
-                                    .create(true)
-                                    .append(true)
-                                    .open(
-                                        format!(
-                                            "./data/{}.db/history.txt",
-                                            self.dataset.dataset
-                                                .to_lowercase()
-                                                .split("/")
-                                                .last()
-                                                .unwrap_or(&self.dataset.dataset)
-                                        )
-                                    )
-                            {
-                                let _ = writeln!(file, "```sparql\n{}\n```", q);
-                            }
+                            self.dataset.write_to_history(format!("```sparql\n{}\n```", q));
                         }
                         Err(StoreError::EvaluationError(ee)) => {
                             message = ee;
@@ -391,24 +334,9 @@ impl WebServer {
                 "advanced" => {
                     match self.dataset.iterative_update(&sq.clone().unwrap(), q) {
                         Ok(()) => {
-                            if
-                                let Ok(mut file) = std::fs::OpenOptions
-                                    ::new()
-                                    .create(true)
-                                    .append(true)
-                                    .open(
-                                        format!(
-                                            "./data/{}.db/history.txt",
-                                            self.dataset.dataset
-                                                .to_lowercase()
-                                                .split("/")
-                                                .last()
-                                                .unwrap_or(&self.dataset.dataset)
-                                        )
-                                    )
-                            {
-                                let _ = writeln!(file, "```sparql\n{}\n#\n{}\n```", sq.unwrap(), q);
-                            }
+                            self.dataset.write_to_history(
+                                format!("```sparql\n{}\n#\n{}\n```", sq.unwrap(), q)
+                            );
                         }
                         Err(StoreError::EvaluationError(ee)) => {
                             message = ee;
@@ -457,7 +385,7 @@ impl WebServer {
     }
 
     fn generate_entity(&self, entity: &str) -> String {
-        let itm = self.dataset.details(entity);
+        let itm = self.dataset.get_details(entity);
         //Table 1 generation
         let table_1_query = format!(
             r#"
@@ -501,7 +429,11 @@ impl WebServer {
 
         let mut entity_types = String::new();
         for tp in itm.entity_types {
-            entity_types += &schema_link(escape_html(&tp.to_string()));
+            entity_types += &format!(
+                "<a href=\"/explore?id={}\">{}</a>",
+                tp,
+                escape_html(&tp.to_string())
+            );
         }
 
         let name = &itm.name.unwrap_or("No name found".to_string());
@@ -573,7 +505,7 @@ impl WebServer {
             cons += &format!("{{source: \"{}\", target: \"{}\", label: \"{}\"}},", s, t, l);
         }
         entity_page(
-            &linkify(&entity),
+            &external_link(&entity),
             &name,
             &itm.description.unwrap_or("No description found".to_string()),
             &entity_types,
@@ -583,10 +515,6 @@ impl WebServer {
             &jsons,
             &cons
         )
-    }
-
-    fn generate_error(&self) -> String {
-        "<html><body><h1>404 - Page Not Found</h1></body></html>".to_string()
     }
 
     fn generate_scripts(&self) -> String {
@@ -616,26 +544,7 @@ impl WebServer {
             match result {
                 Ok(_) => {
                     success_scripts.push(script_name.clone());
-                    if
-                        let Ok(mut file) = std::fs::OpenOptions
-                            ::new()
-                            .create(true)
-                            .append(true)
-                            .open(
-                                format!(
-                                    "./data/{}.db/history.txt",
-                                    self.dataset.dataset
-                                        .to_lowercase()
-                                        .split("/")
-                                        .last()
-                                        .unwrap_or(&self.dataset.dataset)
-                                )
-                            )
-                    {
-                        let _ = writeln!(file, "{}", script_name);
-                    } else {
-                        println!("failed");
-                    }
+                    self.dataset.write_to_history(script_name.to_string());
                 }
                 Err(StoreError::EvaluationError(ee)) => {
                     err_message = ee;
@@ -732,6 +641,8 @@ impl WebServer {
     }
 
     fn parse_procedures(query_string: &str) -> Vec<(bool, String, String)> {
+        let query_string = url_decode(query_string);
+
         let mut selections: HashMap<String, Vec<String>> = HashMap::new();
 
         for pair in query_string.split('&') {
@@ -790,32 +701,8 @@ impl WebServer {
     }
 
     fn generate_history(&self) -> String {
-        let input = if
-            Path::new(
-                &format!(
-                    "./data/{}.db/history.txt",
-                    self.dataset.dataset
-                        .to_lowercase()
-                        .split("/")
-                        .last()
-                        .unwrap_or(&self.dataset.dataset)
-                )
-            ).exists()
-        {
-            include_str(
-                &format!(
-                    "./data/{}.db/history.txt",
-                    self.dataset.dataset
-                        .to_lowercase()
-                        .split("/")
-                        .last()
-                        .unwrap_or(&self.dataset.dataset)
-                )
-            )
-        } else {
-            String::new()
-        };
-        let mut lines = input.lines().map(str::trim);
+        let input = self.dataset.get_history();
+        let lines = input.lines().map(str::trim);
         let mut inside = String::new();
         let mut sparql_block = String::new();
         let mut in_sparql = false;
@@ -865,17 +752,7 @@ impl WebServer {
         </div>"#,
                         line.replace("Dumping store to", ""),
                         line.replace(
-                            &format!(
-                                "Dumping store to ./data/{}/",
-                                self.dataset.dataset
-                                    .split("/")
-                                    .last()
-                                    .unwrap_or(&self.dataset.dataset)
-                                    .replace(".nt", "")
-                                    .replace(".ttl", "")
-                                    .replace(".db", "")
-                                    .replace(".nq", "")
-                            ),
+                            &format!("Dumping store to ./data/{}/", self.dataset.get_name()),
                             ""
                         )
                     )
@@ -883,118 +760,5 @@ impl WebServer {
             }
         }
         history_page(inside)
-    }
-
-    fn replay_history(&self, content: String) -> Result<(), StoreError> {
-        let mut file = std::fs::OpenOptions
-            ::new()
-            .create(true)
-            .append(true)
-            .open(
-                format!(
-                    "./data/{}.db/history.txt",
-                    self.dataset.dataset
-                        .to_lowercase()
-                        .split("/")
-                        .last()
-                        .unwrap_or(&self.dataset.dataset)
-                )
-            )
-            .unwrap();
-
-        let mut lines = content.lines().map(str::trim);
-        let mut in_sparql = false;
-        let mut sparql_block = String::new();
-
-        for line in lines {
-            if line.starts_with("```sparql") {
-                in_sparql = true;
-                sparql_block.clear();
-            } else if line.starts_with("```") && in_sparql {
-                in_sparql = false;
-                // Execute the SPARQL block
-                if sparql_block.contains("#\n") {
-                    // Advanced query with select and update parts
-                    let parts: Vec<&str> = sparql_block.split("#\n").collect();
-                    if parts.len() == 2 {
-                        let (select_query, update_query) = (parts[0].trim(), parts[1].trim());
-                        self.dataset.iterative_update(select_query, update_query)?;
-                    } else {
-                        // Fallback to regular update if format is unexpected
-                        self.dataset.update(&sparql_block)?;
-                    }
-                } else {
-                    // Regular SPARQL update
-                    self.dataset.update(&sparql_block)?;
-                }
-            } else if in_sparql {
-                sparql_block.push_str(line);
-                sparql_block.push('\n');
-            } else if line.contains("::") && !line.starts_with("Dumping") {
-                // This is a routine execution line
-                let (file, proc) = line.split_once("::").unwrap();
-                let path = Path::new("routines").join(file);
-
-                if let Ok(routine_content) = read_to_string(&path) {
-                    let mut current_name = String::new();
-                    let mut current_query = String::new();
-                    let mut in_proc = false;
-                    let mut is_advanced = false;
-
-                    for routine_line in routine_content.lines() {
-                        if routine_line.starts_with("##") {
-                            if in_proc && current_name == proc {
-                                // Execute the found procedure
-                                if is_advanced {
-                                    let parts: Vec<&str> = current_query.split("#\n").collect();
-                                    if parts.len() == 2 {
-                                        let (select_query, update_query) = (
-                                            parts[0].trim(),
-                                            parts[1].trim(),
-                                        );
-                                        self.dataset.iterative_update(select_query, update_query)?;
-                                    } else {
-                                        self.dataset.update(&current_query)?;
-                                    }
-                                } else {
-                                    self.dataset.update(&current_query)?;
-                                }
-                                break;
-                            }
-                            is_advanced = routine_line.ends_with("@advanced");
-                            current_name = routine_line.trim_start_matches("##").trim().to_string();
-                            current_query.clear();
-                            in_proc = true;
-                        } else if in_proc {
-                            current_query.push_str(routine_line);
-                            current_query.push('\n');
-                        }
-                    }
-
-                    // Handle case where procedure is at the end of file
-                    if in_proc && current_name == proc {
-                        if is_advanced {
-                            let parts: Vec<&str> = current_query.split("#\n").collect();
-                            if parts.len() == 2 {
-                                let (select_query, update_query) = (
-                                    parts[0].trim(),
-                                    parts[1].trim(),
-                                );
-                                self.dataset.iterative_update(select_query, update_query)?;
-                            } else {
-                                self.dataset.update(&current_query)?;
-                            }
-                        } else {
-                            self.dataset.update(&current_query)?;
-                        }
-                    }
-                }
-            }
-            if !line.starts_with("Dumping") {
-                let _ = writeln!(file, "{}", line);
-            }
-        }
-
-        Ok(())
     }
 }

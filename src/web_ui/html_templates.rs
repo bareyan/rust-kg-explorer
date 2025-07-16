@@ -10,11 +10,7 @@ pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> 
     let mut all_cards = String::new();
 
     for (index, (class, count)) in class_counts.iter().enumerate() {
-        all_cards += &format!(
-            r#"<div class="col-md-4 mb-3 card-entry" data-index="{}" style="display: none;">{}</div>"#,
-            index,
-            class_card(class, *count)
-        );
+        all_cards += &class_card(index, class, *count);
     }
 
     let total_cards = class_counts.len().to_string();
@@ -34,7 +30,29 @@ pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> 
     )
 }
 
-pub(crate) fn explore_page(data: &str, navigation: &str) -> String {
+pub(crate) fn explore_page(id: &str, page_num: u32, data: &str) -> String {
+    let mut navigation = String::new();
+
+    navigation += r#"<div class="d-flex justify-content-between gap-2 mt-4">"#;
+
+    // Previous button
+    if page_num > 1 {
+        navigation += &format!(
+            r#"<a class="btn btn-outline-primary" href="/explore?id={id}&page={}">Previous</a>"#,
+            page_num - 1
+        );
+    } else {
+        navigation += r#"<button class="btn btn-outline-secondary" disabled>Previous</button>"#;
+    }
+    navigation += &format!("<p>Page {page_num}</p>");
+    // Next button
+    navigation += &format!(
+        r#"<a class="btn btn-outline-primary" href="/explore?id={id}&page={}">Next</a>"#,
+        page_num + 1
+    );
+
+    navigation += "</div>";
+
     let template = Template::new(
         include_str!("../../templates/explore.html"),
         &["nav", "navigation", "data"]
@@ -119,28 +137,6 @@ pub(crate) fn entity_page(
             cons = cons
         )
     )
-}
-
-pub(crate) fn object_card(name: &str, description: &str, image: &str, id: &str) -> String {
-    let template = Template::new(
-        include_str!("../../templates/parts/object_card.html"),
-        &["nav", "id", "image", "name", "description"]
-    );
-
-    template.render(
-        named_args!(nav = NAV, id = id, image = image, name = name, description = description)
-    )
-}
-
-pub(crate) fn class_card(name: &str, count: u32) -> String {
-    let entity_name = &name.split("/").last().unwrap_or_default().replace(">", "");
-    let count = &format!("{count}");
-    let template = Template::new(
-        include_str!("../../templates/parts/class_card.html"),
-        &["nav", "name", "entity_name", "count"]
-    );
-
-    template.render(named_args!(nav = NAV, name = name, entity_name = entity_name, count = count))
 }
 
 pub(crate) fn routines_page() -> String {
@@ -234,5 +230,28 @@ fn procedure_section(file: &str, name: &str, query: &str) -> String {
     </div>
     <pre class="bg-body border rounded p-2 mt-2" style="display:none" id="{elem_id}"><code>{query}</code></pre>
 </div>"#
+    )
+}
+
+pub(crate) fn object_card(name: &str, description: &str, image: &str, id: &str) -> String {
+    let template = Template::new(
+        include_str!("../../templates/parts/object_card.html"),
+        &["id", "image", "name", "description"]
+    );
+
+    template.render(named_args!(id = id, image = image, name = name, description = description))
+}
+
+pub(crate) fn class_card(index: usize, name: &str, count: u32) -> String {
+    let entity_name = &name.split("/").last().unwrap_or_default().replace(">", "");
+    let count = &format!("{count}");
+    let index = &format!("{index}");
+    let template = Template::new(
+        include_str!("../../templates/parts/class_card.html"),
+        &["index", "name", "entity_name", "count"]
+    );
+
+    template.render(
+        named_args!(index = index, name = name, entity_name = entity_name, count = count)
     )
 }

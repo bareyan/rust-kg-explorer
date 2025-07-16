@@ -1,3 +1,5 @@
+//! Module for managing the webui
+
 pub mod server;
 pub mod html_templates;
-pub mod templetization;
+mod templetization;
