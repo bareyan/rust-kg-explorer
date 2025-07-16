@@ -28,7 +28,7 @@ WHERE {
   BIND(IRI(CONCAT("urn:iata:", STR(?iata))) AS ?newIRI)
 }
 
-## Merge using icao code
+## Merge using icao code@advanced
 SELECT ?s1 ?s2 WHERE  {
     ?s1 a <http://schema.org/Airport>.
     ?s2 a <http://schema.org/Airport>.
