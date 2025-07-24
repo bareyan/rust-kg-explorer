@@ -32,3 +32,19 @@ WHERE {
   BIND(REPLACE(STR(?country), "\\s+", "_") AS ?cleanName)
   BIND(IRI(CONCAT("urn:Country:", ?cleanName)) AS ?newIRI)
 }
+
+## Merge countries using name@advanced
+SELECT ?s1 ?s2 WHERE {
+  ?s1 a <http://schema.org/Country> ;
+      <http://schema.org/name> ?name .
+  ?s2 a <http://schema.org/Country> ;
+      <http://schema.org/name> ?name .
+  FILTER(str(?s1) < str(?s2))  # Choose deterministic pair direction
+}
+#
+DELETE {?sub ?pred {{s2}}}
+INSERT {?sub ?pred {{s1}}}
+WHERE  {?sub ?pred {{s2}}};
+DELETE {{{s2}} ?p ?o}
+INSERT {{{s1}} ?p ?o}
+WHERE  {{{s2}} ?p ?o}
