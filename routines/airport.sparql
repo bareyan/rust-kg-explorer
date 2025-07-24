@@ -1,5 +1,4 @@
 ### Routines for cleaning up the airport kg
-
 ## Merge using the iata code, assign a new IRI
 DELETE {
   ?sub ?p ?s
@@ -42,6 +41,22 @@ SELECT ?s1 ?s2 WHERE  {
     ?s1 a <http://schema.org/Airport>.
     ?s2 a <http://schema.org/Airport>.
     ?s1 <http://schema.org/icaocode> ?o0. ?s2 <http://schema.org/icaocode> ?o0.
+    FILTER(STR(?s1) < STR(?s2))
+}
+#
+DELETE { ?sub ?pred {{s2}} }
+INSERT { ?sub ?pred {{s1}} }
+WHERE  { ?sub ?pred {{s2}} };
+DELETE { {{s2}} ?p ?o }
+INSERT { {{s1}} ?p ?o }
+WHERE  { {{s2}} ?p ?o }
+
+
+## Merge using the iata code, assign a new IRI@advanced
+SELECT ?s1 ?s2 WHERE  {
+    ?s1 a <http://schema.org/Airport>.
+    ?s2 a <http://schema.org/Airport>.
+    ?s1 <http://schema.org/iatacode> ?o0. ?s2 <http://schema.org/iatacode> ?o0.
     FILTER(STR(?s1) < STR(?s2))
 }
 #
