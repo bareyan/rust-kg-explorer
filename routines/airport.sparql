@@ -28,6 +28,15 @@ WHERE {
   BIND(IRI(CONCAT("urn:iata:", STR(?iata))) AS ?newIRI)
 }
 
+## Drop iata code with N/A value
+DELETE {
+  ?s <http://schema.org/iatacode> ?iata .
+}
+WHERE {
+  ?s <http://schema.org/iatacode> ?iata .
+  FILTER(str(?iata) = "N/A") 
+}
+
 ## Merge using icao code@advanced
 SELECT ?s1 ?s2 WHERE  {
     ?s1 a <http://schema.org/Airport>.
