@@ -1,0 +1,16 @@
+### class_graph@hidden
+
+
+## Clear class relations graph
+CLEAR GRAPH <urn:class_relations>
+## Create class relations graph
+INSERT {
+  GRAPH <urn:class_relations> {
+    ?t1 ?p ?t2 .
+  }
+}
+WHERE {
+  ?s1 a ?t1 .
+  ?s2 a ?t2 .
+  ?s1 ?p ?s2 .
+}

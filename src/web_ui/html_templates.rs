@@ -5,6 +5,7 @@ use crate::{ named_args, utils::escape_html, web_ui::templetization::Template };
 use crate::web_ui::templetization::include_str;
 
 const NAV: &str = include_str!("../../templates/parts/nav.html");
+const DEBUG: bool = true;
 
 pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> String {
     let mut all_cards = String::new();
@@ -14,19 +15,16 @@ pub(crate) fn index_page(dataset_name: &str, class_counts: &[(String, u32)]) -> 
     }
 
     let total_cards = class_counts.len().to_string();
+    let file = if DEBUG {
+        include_str("./templates/index.html").to_string()
+    } else {
+        include_str!("../../templates/index.html").to_string()
+    };
 
-    let template = Template::new(
-        include_str!("../../templates/index.html"),
-        &["nav", "ds_name", "all_cards", "total_cards"]
-    );
-
+    let template = Template::new(&file, &["nav", "ds_name", "all_cards", "total_cards"]);
+    let ds_low = &dataset_name.to_lowercase();
     template.render(
-        named_args!(
-            nav = NAV,
-            ds_name = dataset_name,
-            all_cards = &all_cards,
-            total_cards = &total_cards
-        )
+        named_args!(nav = NAV, ds_name = ds_low, all_cards = &all_cards, total_cards = &total_cards)
     )
 }
 
@@ -52,11 +50,13 @@ pub(crate) fn explore_page(id: &str, page_num: u32, data: &str) -> String {
     );
 
     navigation += "</div>";
+    let file = if DEBUG {
+        include_str("./templates/explore.html").to_string()
+    } else {
+        include_str!("../../templates/explore.html").to_string()
+    };
 
-    let template = Template::new(
-        include_str!("../../templates/explore.html"),
-        &["nav", "navigation", "data"]
-    );
+    let template = Template::new(&file, &["nav", "navigation", "data"]);
 
     template.render(named_args!(nav = NAV, navigation = navigation, data = data))
 }
@@ -67,12 +67,22 @@ pub(crate) fn query_page(
     table_headers_js_array: &str,
     message: &str
 ) -> String {
-    let htmlcode = &include_str("templates/query.html");
-    let html_template = Template::new(htmlcode, &["nav", "message", "nb_results", "js"]);
+    let file = if DEBUG {
+        include_str("./templates/query.html").to_string()
+    } else {
+        include_str!("../../templates/query.html").to_string()
+    };
 
-    let jscode = &include_str("templates/query.js");
+    let html_template = Template::new(&file, &["nav", "message", "nb_results", "js"]);
+
+    let jscode = if DEBUG {
+        include_str("./templates/query.js").to_string()
+    } else {
+        include_str!("../../templates/query.js").to_string()
+    };
+
     let js_template = Template::new(
-        jscode,
+        &jscode,
         &["table_rows_js_array", "table_headers_js_array", "api_key"]
     );
 
@@ -103,10 +113,18 @@ pub(crate) fn entity_page(
     jsons: &str,
     cons: &str
 ) -> String {
-    let js = &include_str("templates/graph_renderer.js");
-    let html = &include_str("templates/entity.html");
+    let (js, html) = if DEBUG {
+        let js = include_str("templates/graph_renderer.js");
+        let html = include_str("templates/entity.html");
+        (js, html)
+    } else {
+        let js = include_str!("../../templates/graph_renderer.js").to_string();
+        let html = include_str!("../../templates/entity.html").to_string();
+        (js, html)
+    };
+
     let template = Template::new(
-        html,
+        &html,
         &[
             "nav",
             "image",
@@ -152,24 +170,93 @@ pub(crate) fn routines_page() -> String {
             }
         }
     }
-    let template = Template::new(
-        include_str!("../../templates/routines.html"),
-        &["nav", "script_cards"]
-    );
+
+    let file = if DEBUG {
+        include_str("./templates/routines.html").to_string()
+    } else {
+        include_str!("../../templates/routines.html").to_string()
+    };
+
+    let template = Template::new(&file, &["nav", "script_cards"]);
 
     template.render(named_args!(nav = NAV, script_cards = &script_cards))
 }
 
 pub(crate) fn history_page(inside: String) -> String {
-    let template = Template::new(include_str!("../../templates/history.html"), &["nav", "inside"]);
+    let file = if DEBUG {
+        include_str("./templates/history.html").to_string()
+    } else {
+        include_str!("../../templates/history.html").to_string()
+    };
+    let template = Template::new(&file, &["nav", "inside"]);
 
     template.render(named_args!(nav = NAV, inside = inside))
 }
 
+pub(crate) fn analysis_page(start_with: &str) -> String {
+    let file = if DEBUG {
+        include_str("./templates/analysis/index.html").to_string()
+    } else {
+        include_str!("../../templates/analysis/index.html").to_string()
+    };
+
+    let template = Template::new(&file, &["nav", "start_with"]);
+
+    template.render(named_args!(nav = NAV, start_with = start_with))
+}
+
+pub(crate) fn class_analysis_page(class_anal: &str) -> String {
+    let file = if DEBUG {
+        include_str("./templates/analysis/class_analysis.html").to_string()
+    } else {
+        include_str!("../../templates/analysis/class_analysis.html").to_string()
+    };
+
+    let template = Template::new(&file, &["nav", "class_anal"]);
+
+    template.render(named_args!(nav = NAV, class_anal = class_anal))
+}
+
+pub(crate) fn predicate_analysis_page(
+    classes: &str,
+    preds_to_delete: Vec<(String, String)>
+) -> String {
+    let file = if DEBUG {
+        include_str("./templates/analysis/predicate_analysis.html").to_string()
+    } else {
+        include_str!("../../templates/analysis/predicate_analysis.html").to_string()
+    };
+
+    let mut preds_list = String::new();
+    for p in preds_to_delete {
+        preds_list += &format!("{{class: \"{}\", pred: \"{}\"}},", p.0, p.1);
+    }
+
+    let template = Template::new(&file, &["nav", "classes", "preds_to_delete"]);
+
+    template.render(
+        named_args!(nav = NAV, classes = classes, preds_to_delete = preds_list.as_str())
+    )
+}
+
+pub(crate) fn class_relation_graph(nodes: &str, edges: &str) -> String {
+    let file = if DEBUG {
+        include_str("./templates/analysis/graph.html").to_string()
+    } else {
+        include_str!("../../templates/analysis/graph.html").to_string()
+    };
+
+    let template = Template::new(&file, &["nav", "nodes", "edges"]);
+
+    template.render(named_args!(nav = NAV, nodes = nodes, edges = edges))
+}
 fn script_card(path: &Path, content: &str) -> String {
     let file_name = path.file_name().unwrap().to_string_lossy();
     let mut lines = content.lines();
     let description = lines.next().unwrap_or("").trim_start_matches("###").trim();
+    if description.ends_with("@hidden") {
+        return String::new();
+    }
 
     let mut body = String::new();
     let mut current_proc_name = String::new();
@@ -234,10 +321,12 @@ fn procedure_section(file: &str, name: &str, query: &str) -> String {
 }
 
 pub(crate) fn object_card(name: &str, description: &str, image: &str, id: &str) -> String {
-    let template = Template::new(
-        include_str!("../../templates/parts/object_card.html"),
-        &["id", "image", "name", "description"]
-    );
+    let file = if DEBUG {
+        include_str("./templates/parts/object_card.html").to_string()
+    } else {
+        include_str!("../../templates/parts/object_card.html").to_string()
+    };
+    let template = Template::new(&file, &["id", "image", "name", "description"]);
 
     template.render(named_args!(id = id, image = image, name = name, description = description))
 }
@@ -246,10 +335,13 @@ pub(crate) fn class_card(index: usize, name: &str, count: u32) -> String {
     let entity_name = &name.split("/").last().unwrap_or_default().replace(">", "");
     let count = &format!("{count}");
     let index = &format!("{index}");
-    let template = Template::new(
-        include_str!("../../templates/parts/class_card.html"),
-        &["index", "name", "entity_name", "count"]
-    );
+    let file = if DEBUG {
+        include_str("./templates/parts/class_card.html").to_string()
+    } else {
+        include_str!("../../templates/parts/class_card.html").to_string()
+    };
+
+    let template = Template::new(&file, &["index", "name", "entity_name", "count"]);
 
     template.render(
         named_args!(index = index, name = name, entity_name = entity_name, count = count)

@@ -45,7 +45,7 @@ INSERT {
     ?sub ?p ?url.
 }
 WHERE {
-    ?s a <http://schema.org/ImageObject>.
+    ?s a <http://schema.org/imageobject>.
     ?s <http://schema.org/url> ?url.
     ?sub ?p ?s.
 };
@@ -57,14 +57,14 @@ INSERT {
     ?url ?p ?o.
 }
 WHERE {
-    ?s a <http://schema.org/ImageObject>.
+    ?s a <http://schema.org/imageobject>.
     ?s <http://schema.org/url> ?url.
     ?s ?p ?o.
 };
 
 ## Add ImageObject annotation for objects used with predicate image/photo/logo
 INSERT {
-    ?url a <http://schema.org/ImageObject>.
+    ?url a <http://schema.org/imageobject>.
     ?url <http://schema.org/url> ?url.
 }
 WHERE {
@@ -75,7 +75,7 @@ WHERE {
 };
 
 INSERT {
-    ?url a <http://schema.org/ImageObject>.
+    ?url a <http://schema.org/imageobject>.
     ?url <http://schema.org/url> ?url.
 }
 WHERE {
@@ -86,7 +86,7 @@ WHERE {
 };
 
 INSERT {
-    ?url a <http://schema.org/ImageObject>.
+    ?url a <http://schema.org/imageobject>.
     ?url <http://schema.org/url> ?url.
 }
 WHERE {
@@ -124,7 +124,7 @@ DELETE {
     ?sub ?p ?s
 }
 WHERE {
-    ?s a <http://schema.org/ImageObject>.
+    ?s a <http://schema.org/imageobject>.
     ?sub ?p ?s.
 };
 
@@ -132,7 +132,7 @@ DELETE {
     ?s ?p ?o.
 }
 WHERE {
-    ?s a <http://schema.org/ImageObject>.
+    ?s a <http://schema.org/imageobject>.
     ?s ?p ?o.
 }
 

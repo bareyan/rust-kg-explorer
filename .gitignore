@@ -1,3 +1,6 @@
 /target
 /data/*
 .env
+reports/*
+!reports/*.pdf
+!reports/*.tex

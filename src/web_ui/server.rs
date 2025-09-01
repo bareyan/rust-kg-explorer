@@ -1,43 +1,49 @@
 use core::option::Option::None;
 use std::collections::{ HashMap, HashSet };
-use std::fs::read_to_string;
 use std::io::{ prelude::*, BufReader };
 use std::net::{ TcpListener, TcpStream };
-use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
 use oxigraph::model::Term::Literal;
+use petgraph::Direction::Outgoing;
 
 use crate::store::KG;
 use crate::utils::{
-    extract_query_param,
+    calculate_probabilities_for_graph,
     escape_html,
-    format_json,
     external_link,
+    extract_query_param,
+    format_json,
     to_link,
     url_decode,
 };
 use crate::web_ui::html_templates::{
-    explore_page,
+    analysis_page,
+    class_analysis_page,
+    class_relation_graph,
     entity_page,
+    explore_page,
     history_page,
     index_page,
+    predicate_analysis_page,
     query_page,
     routines_page,
 };
 use crate::store::StoreError;
+use std::io::Write;
 
 enum Page {
     Index,
     Explore(String, u32),
     Query(Option<String>, Option<String>, Option<String>),
     Entity(String),
-    Run(Vec<(bool, String, String)>),
+    Run(Vec<String>),
     Scripts,
     Error,
     Redirect,
     History,
+    ClassRelations(i32, String),
 }
 
 pub(crate) struct WebServer {
@@ -168,6 +174,18 @@ impl WebServer {
                 self.dataset.dump_store();
                 ("HTTP/1.1 200 OK", Page::Redirect)
             }
+            "/delete_predicate" => {
+                match query_string {
+                    Some(qs) => {
+                        let otype = extract_query_param(qs, "otype").unwrap();
+                        let pred = extract_query_param(qs, "pred").unwrap();
+
+                        self.dataset.delete_predicate(&otype, &pred);
+                        ("HTTP/1.1 200 OK", Page::Redirect)
+                    }
+                    None => ("HTTP/1.1 400 BAD REQUEST", Page::Error),
+                }
+            }
             "/history" => { ("HTTP/1.1 200 OK", Page::History) }
             route if route.starts_with("/restore/") => {
                 let v = route
@@ -190,10 +208,33 @@ impl WebServer {
                 reader.read_exact(&mut body_buf).unwrap();
 
                 let payload = String::from_utf8(body_buf).unwrap();
-                if let Err(_) = self.dataset.replay_history(payload) {
+                if let Err(_) = self.dataset.execute(payload) {
                     eprintln!("Error during replay_history");
                 }
                 ("HTTP/1.1 200 OK", Page::Redirect)
+            }
+            "/analysis" => {
+                match query_string {
+                    Some(qs) => {
+                        (
+                            "HTTP/1.1 200 OK",
+                            Page::ClassRelations(
+                                match
+                                    extract_query_param(qs, "page")
+                                        .unwrap_or("".to_string())
+                                        .as_str()
+                                {
+                                    "graph" => 1,
+                                    "classes" => 2,
+                                    "predicates" => 3,
+                                    _ => 0,
+                                },
+                                extract_query_param(qs, "start_with").unwrap().to_string()
+                            ),
+                        )
+                    }
+                    None => ("HTTP/1.1 400 BAD REQUEST", Page::Error),
+                }
             }
             _ => ("HTTP/1.1 404 NOT FOUND", Page::Error),
         };
@@ -210,6 +251,7 @@ impl WebServer {
             Page::Error => "<html><body><h1>404 - Page Not Found</h1></body></html>".to_string(),
             Page::Redirect => include_str!("../../templates/redirect.html").to_string(),
             Page::History => self.generate_history(),
+            Page::ClassRelations(page, uri) => self.generate_analytics(page, &uri),
         };
 
         let response = format!(
@@ -517,71 +559,314 @@ ORDER BY DESC(?count)
         )
     }
 
+    fn generate_analytics(&self, page: i32, start_with: &str) -> String {
+        self.dataset.calculate_class_relations_graph();
+        if page == 0 {
+            return analysis_page(start_with);
+        }
+
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut items = vec![(format!("<http://schema.org/{}>", start_with), 0)];
+        let mut connections = vec![];
+        let mut cons = String::new();
+        let mut jsons = String::new();
+
+        let mut order = vec![];
+
+        while items.len() > 0 {
+            let (ent, depth) = items.get(0).unwrap().clone();
+            if seen.contains(&ent) {
+                items.remove(0);
+                continue;
+            }
+            seen.insert(ent.clone());
+
+            let count_query = format!(
+                r#"
+SELECT (COUNT(DISTINCT ?s) as ?cnt)
+WHERE {{
+    ?s a {ent}.
+
+}}    
+"#
+            );
+            let count = match self.dataset.query(&count_query) {
+                Ok(res) => {
+                    match res.first().unwrap().get("cnt").unwrap() {
+                        Literal(l) => l.value().parse::<u64>().unwrap(),
+                        _ => 0,
+                    }
+                }
+                Err(_) => panic!("Failed to fetch use count"),
+            };
+
+            order.push((ent.clone(), count, depth));
+            if page == 1 {
+                jsons += &format!("{{id: \"{ent}\", label: \"{ent}\"}},");
+            }
+            let complex_connections_query = format!(
+                r#"PREFIX schema: <http://schema.org/>
+                    SELECT DISTINCT ?predicate ?object
+                    FROM <urn:class_relations>
+                    WHERE {{
+                        {ent} ?predicate ?object .
+                        ?object ?p ?oo .
+                }}"#
+            );
+
+            let complex_connections = self.dataset
+                .query(&complex_connections_query)
+                .unwrap_or_default();
+            for row in complex_connections {
+                let cur = row.get("object").unwrap().to_string();
+                if page == 1 {
+                    connections.push((
+                        ent.clone(),
+                        cur.clone(),
+                        row.get("predicate").unwrap().to_string(),
+                    ));
+                }
+                items.push((cur, depth + 1));
+            }
+            items.remove(0);
+        }
+        for (s, t, l) in connections {
+            cons += &format!("{{from: \"{}\", to: \"{}\", label: \"{}\"}},", s, t, l);
+        }
+
+        let mut classes = String::new();
+        let mut class_analysis = String::new();
+
+        order.reverse();
+
+        // let c = order.len();
+        if page == 2 {
+            let scores = self.dataset.stat_anal_types(start_with);
+            for (otype, (cnt, depth, pr, rpr, round, keep, score)) in scores {
+                class_analysis += &format!(
+                    "<tr class='{}-row'><td>{}</td><td>{cnt}</td><td>{depth}</td><td>{pr}</td><td>{rpr}</td><td>{round}</td><td>{score}</td></tr>",
+                    if keep {
+                        "green"
+                    } else {
+                        "red"
+                    },
+                    escape_html(&otype)
+                );
+            }
+        }
+        let mut preds_to_delete = vec![];
+
+        if page == 3 {
+            let (mut graph, node_map) = self.dataset.calculate_class_relations_graph();
+            calculate_probabilities_for_graph(&mut graph);
+            let mut node_counts: HashMap<String, f64> = HashMap::new();
+
+            for node in node_map.keys() {
+                if node == "Literal" {
+                    continue;
+                }
+                let q = format!(
+                    r#"
+            SELECT (COUNT(?s) as ?cnt) WHERE {{
+                ?s a {node}.
+            }}
+            "#
+                );
+                let cnt = *self.dataset.get_counts(&q, "cnt").get(0).unwrap();
+                node_counts.insert(node.clone(), cnt);
+            }
+
+            let (_, edge_rank) = self.dataset.page_rank(&graph, &node_map, &node_counts, Outgoing);
+            for (o, count, _) in order {
+                let mut table =
+                    r#"<table class="table table-bordered table-hover" style="width:100%">
+              <thead class="table-light">
+                <tr>
+                    <th>Predicate</th>
+                    <th>Frequency</th>
+                    <th>Uniqueness</th>
+                    <th>Entropy</th>
+                    <th>Entity Quality</th>
+                    <th>Edge Rank</th>
+                    <th>Score</th>
+                    <th>NN Confidence</th>
+                    <th>NN Keep</th>
+                    <th>Score Based Keep</th>
+                    <th>Hybrid Decision</td>
+                </tr>
+              </thead>
+              <tbody>"#.to_string();
+
+                let data = self.dataset
+                    .stat_anal_predicates(&o, edge_rank.get(&o).unwrap())
+                    .unwrap_or(vec![]);
+                let mut thres = 60.0;
+
+                let mut mean_passed_score = 0.0;
+                let mut passed_count = 0;
+                for (_, stats) in &data {
+                    if thres > 0.0 {
+                        mean_passed_score += stats["score"];
+                        passed_count += 1;
+                    }
+                    thres -= stats["score"];
+                }
+                mean_passed_score = mean_passed_score / (passed_count as f64);
+                thres = 60.0;
+                for (p, stats) in data {
+                    // let color = if thres > 0.0 { "green" } else { "red" };
+                    // table += &format!("<tr class=\"{color}-row\"><td>{}</td>", escape_html(&p));
+                    table += &format!("<tr><td>{}</td>", escape_html(&p));
+
+                    for key in [
+                        "frequency",
+                        "uniqueness",
+                        "entropy",
+                        "quality",
+                        "edge_rank",
+                        "score",
+                        "keep",
+                        // "score_ratio",
+                    ] {
+                        table += &format!("<td>{}</td>", stats.get(key).unwrap_or(&0.0));
+                    }
+                    let mut keep_nn = false;
+                    let mut keep_score = false;
+                    if *stats.get("keep").unwrap() > 0.5 {
+                        table += "<td>✅</td>";
+                        keep_nn = true;
+                    } else {
+                        table += "<td>❌</td>";
+                    }
+                    if thres > 0.0 {
+                        table += "<td>✅</td>";
+                        keep_score = true;
+                    } else {
+                        table += "<td>❌</td>";
+                    }
+                    if !keep_nn && keep_score {
+                        let s =
+                            stats["keep"] + (stats["keep"] * stats["score"]) / mean_passed_score;
+                        table += &format!("<td>{}</td>", if s >= 0.5 { "✅" } else { "❌" });
+                        if s < 0.5 {
+                            preds_to_delete.push((o.clone(), p.clone()));
+                        }
+                    }
+                    if !keep_nn && !keep_score {
+                        table += "<td>❌</td>";
+                        preds_to_delete.push((o.clone(), p));
+                    }
+                    if keep_nn {
+                        table += "<td>✅</td>";
+                    }
+
+                    // table += &format!("<td>{}</td>", stats[""]);
+                    thres -= stats["score"];
+                    table += "</tr>";
+                }
+
+                let keep = self.dataset.analyse_objects(&o);
+                classes += &format!(
+                    r#"<div class="card shadow-sm my-5 px-0"><div class="card-header bg-primary text-white ">
+                  <h3 class="mb-0 text-center">{}</h3>
+                </div>
+                <div class="card-body">
+                <p>Found {count} entities</p>
+                <b>{keep} good ones</b>
+                {table}</tbody></table></div>
+                </div>
+                "#,
+                    escape_html(&o)
+                );
+            }
+        }
+
+        println!("Finita la comedia");
+        match page {
+            1 => class_relation_graph(&jsons, &cons),
+            2 => class_analysis_page(&class_analysis),
+            3 => predicate_analysis_page(&classes, preds_to_delete),
+            _ => analysis_page(start_with),
+        }
+    }
+
     fn generate_scripts(&self) -> String {
         routines_page()
     }
 
-    fn generate_run_results(&self, queries: Vec<(bool, String, String)>) -> String {
+    fn generate_run_results(&self, routines: Vec<String>) -> String {
         let initial_count = self.dataset.count_lines();
-        let mut err = false;
-        let mut err_message = String::new();
-        let mut err_index = 0usize;
-        let mut success_scripts = vec![];
-        let mut failed_script = None;
 
-        for (i, (advanced, script_name, query)) in queries.iter().enumerate() {
-            let result = if *advanced {
-                let parts: Vec<&str> = query.split("#\n").collect();
-                if parts.len() != 2 {
-                    self.dataset.update(query)
-                } else {
-                    let (select_query, update_query) = (parts[0], parts[1]);
-                    self.dataset.iterative_update(select_query, update_query)
-                }
-            } else {
-                self.dataset.update(query)
-            };
-            match result {
-                Ok(_) => {
-                    success_scripts.push(script_name.clone());
-                    self.dataset.write_to_history(script_name.to_string());
-                }
-                Err(StoreError::EvaluationError(ee)) => {
-                    err_message = ee;
-                    err = true;
-                    err_index = i;
-                    failed_script = Some(script_name.clone());
-                    break;
-                }
-                Err(StoreError::UnsupportedError) => {
-                    err = true;
-                    err_index = i;
-                    failed_script = Some(script_name.clone());
-                    break;
-                }
-            }
-        }
+        let result = self.dataset.execute(routines.join("\n"));
 
         let final_count = self.dataset.count_lines();
         let diff = (final_count as i64) - (initial_count as i64);
         let action = if diff >= 0 { "Inserted" } else { "Deleted" };
         let count = diff.abs();
-        if err {
-            let skipped_scripts = queries
-                .iter()
-                .skip(err_index + 1)
-                .map(|(_, name, _)| format!("<li>{}</li>", name))
-                .collect::<String>();
+        match result {
+            Ok(_) => {
+                let script_list = routines
+                    .iter()
+                    .map(|name| format!("<li>{}</li>", name))
+                    .collect::<String>();
 
-            let ran_scripts = success_scripts
-                .iter()
-                .map(|name| format!("<li>{}</li>", name))
-                .collect::<String>();
+                return format!(
+                    r#"
+    <!DOCTYPE html>
+    <html lang="en" data-bs-theme="dark">
+    <head>
+      <meta charset="UTF-8">
+      <title>Success</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="d-flex justify-content-center align-items-center vh-100">
+      <div class="text-center">
+        <h1 class="text-success mb-4">Success!</h1>
+        <div class="alert alert-success text-start mx-auto" style="max-width: 500px;">
+          <p><strong>{action}:</strong> {count} triples</p>
+          <p><strong>Scripts executed:</strong></p>
+          <ul>{script_list}</ul>
+        </div>
+        <a href="/routines" class="btn btn-success mt-3">Return</a>
+      </div>
+    </body>
+    </html>
+    "#
+                );
+            }
+            Err((e, cnt)) => {
+                let cnt_usize = cnt as usize;
+                let ran_scripts = if cnt_usize > 0 {
+                    routines[0..cnt_usize - 1]
+                        .iter()
+                        .map(|name| format!("<li>{}</li>", name))
+                        .collect::<String>()
+                } else {
+                    String::new()
+                };
+                let skipped_scripts = if cnt_usize > 0 && cnt_usize <= routines.len() {
+                    routines[cnt_usize - 1..]
+                        .iter()
+                        .map(|name| format!("<li>{}</li>", name))
+                        .collect::<String>()
+                } else {
+                    routines
+                        .iter()
+                        .map(|name| format!("<li>{}</li>", name))
+                        .collect::<String>()
+                };
 
-            let failed_name = failed_script.unwrap_or_else(|| "Unknown".to_string());
-
-            format!(
-                r#"
+                let failed_name = if cnt_usize > 0 && cnt_usize <= routines.len() {
+                    routines.get(cnt_usize - 1).unwrap()
+                } else {
+                    "Unknown"
+                };
+                let err_message = match e {
+                    StoreError::EvaluationError(e) => e,
+                    StoreError::UnsupportedError => "Query Not Supported".to_string(),
+                };
+                return format!(
+                    r#"
     <!DOCTYPE html>
     <html lang="en" data-bs-theme="dark">
     <head>
@@ -607,97 +892,26 @@ ORDER BY DESC(?count)
     </body>
     </html>
     "#
-            )
-        } else {
-            let script_list = success_scripts
-                .iter()
-                .map(|name| format!("<li>{}</li>", name))
-                .collect::<String>();
-
-            format!(
-                r#"
-    <!DOCTYPE html>
-    <html lang="en" data-bs-theme="dark">
-    <head>
-      <meta charset="UTF-8">
-      <title>Success</title>
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    </head>
-    <body class="d-flex justify-content-center align-items-center vh-100">
-      <div class="text-center">
-        <h1 class="text-success mb-4">Success!</h1>
-        <div class="alert alert-success text-start mx-auto" style="max-width: 500px;">
-          <p><strong>{action}:</strong> {count} triples</p>
-          <p><strong>Scripts executed:</strong></p>
-          <ul>{script_list}</ul>
-        </div>
-        <a href="/routines" class="btn btn-success mt-3">Return</a>
-      </div>
-    </body>
-    </html>
-    "#
-            )
+                );
+            }
         }
     }
 
-    fn parse_procedures(query_string: &str) -> Vec<(bool, String, String)> {
+    fn parse_procedures(query_string: &str) -> Vec<String> {
         let query_string = url_decode(query_string);
 
-        let mut selections: HashMap<String, Vec<String>> = HashMap::new();
-
+        let mut selections: Vec<String> = vec![];
         for pair in query_string.split('&') {
             if let Some((key, _value)) = pair.split_once('=') {
                 if let Some((file, proc)) = key.split_once("::") {
                     let file = url_decode(file);
                     let proc = url_decode(proc);
-                    if let Some(l) = selections.get_mut(&file) {
-                        l.push(proc);
-                    } else {
-                        selections.insert(file, vec![proc]);
-                    }
+                    selections.push(format!("{}::{}", file, proc));
+                    println!("{}->{}", file, proc);
                 }
             }
         }
-        let mut found_queries = Vec::new();
-
-        for key in selections.keys() {
-            let wanted = selections.get(key).unwrap();
-            let path = Path::new("routines").join(&key);
-            if let Ok(content) = read_to_string(&path) {
-                let mut current_name = String::new();
-                let mut current_query = String::new();
-                let mut in_proc = false;
-                let mut is_advanced = false;
-
-                for line in content.lines() {
-                    if line.starts_with("##") {
-                        if in_proc && wanted.contains(&current_name) {
-                            found_queries.push((
-                                is_advanced,
-                                format!("{}::{}", key, current_name),
-                                current_query.trim().to_string(),
-                            ));
-                        }
-                        is_advanced = line.ends_with("@advanced");
-                        current_name = line.trim_start_matches("##").trim().to_string();
-                        current_query.clear();
-                        in_proc = true;
-                    } else if in_proc {
-                        current_query.push_str(line);
-                        current_query.push('\n');
-                    }
-                }
-
-                if in_proc && wanted.contains(&current_name) {
-                    found_queries.push((
-                        is_advanced,
-                        format!("{}::{}", key, current_name),
-                        current_query.trim().to_string(),
-                    ));
-                }
-            }
-        }
-        found_queries
+        return selections;
     }
 
     fn generate_history(&self) -> String {

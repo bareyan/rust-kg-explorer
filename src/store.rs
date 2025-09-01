@@ -18,10 +18,12 @@ use core::option::Option::None;
 use core::panic;
 use core::result::Result;
 
+use std::collections::{ HashMap };
 //Working with files
 use std::path::Path;
 use std::fs::{ read_to_string, File };
 use std::io::{ Write };
+
 use std::str::FromStr;
 
 // Timing procedures
@@ -36,12 +38,34 @@ use flate2::read::GzDecoder;
 
 // Oxigraph imports
 use oxigraph::model::{ GraphNameRef, NamedNode, Term };
+use oxigraph::model::Term::Literal;
 use oxigraph::store::Store;
 use oxigraph::sparql::{ QueryResults, QuerySolution };
 use oxigraph::io::{ RdfParser, RdfFormat };
 
+// Petgraph
+
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::{ EdgeRef };
+use petgraph::Direction::{ Incoming, Outgoing };
+use petgraph::{ self, data, Graph };
+use rayon::iter::{ IntoParallelRefIterator, ParallelIterator };
+use rayon::result;
 // Create imports
-use crate::utils::{ self, extract_literal };
+use crate::utils::{
+    self,
+    calculate_probabilities_for_graph,
+    choice,
+    compute_scores,
+    extract_literal,
+    load_predicate_analysis,
+    load_relations,
+    normalize_column,
+    remove_disconnected,
+    save_predicate_anlaysis,
+    save_relations,
+};
 use crate::item;
 
 /// # Enumerates possible errors during store operations.
@@ -114,7 +138,7 @@ impl KG {
         created
     }
 
-    /// # Loading procedures
+    // # Loading procedures
 
     /// Downloads, unpacks, and preprocesses parts of a WDC dataset.
     ///
@@ -316,7 +340,7 @@ impl KG {
         self.history_path = format!("./data/{}.db/history.txt", filename);
     }
 
-    /// # Getters
+    // # Getters
 
     /// Returns the base name of the loaded dataset.
     ///
@@ -337,7 +361,7 @@ impl KG {
         }
     }
 
-    /// # History
+    // # History
 
     /// Appends an operation to the history file.
     ///
@@ -363,7 +387,7 @@ impl KG {
         read_to_string(self.history_path.clone()).unwrap()
     }
 
-    /// # Store operations
+    // # Store operations
 
     /// Executes a SPARQL `SELECT`('CONSTRUCT', `ASK`, or `DESCRIBE` to be implemented) query against the store.
     ///
@@ -462,7 +486,7 @@ impl KG {
         }
     }
 
-    /// # Version management
+    // # Version management
 
     /// Dumps the current graph state to a new N-Triples file.
     ///
@@ -589,37 +613,59 @@ impl KG {
     /// - Supports advanced queries with a `#\n` separator for `SELECT` + `UPDATE`.
     /// - Executes routine files referenced as `file::procedure` lines.
     /// - Logs each replayed line back to the history file.
-    pub fn replay_history(&self, content: String) -> Result<(), StoreError> {
+    pub fn execute(&self, content: String) -> Result<(), (StoreError, i32)> {
         let lines = content.lines().map(str::trim);
         let mut in_sparql = false;
         let mut sparql_block = String::new();
-
+        let mut count = 0;
         for line in lines {
             if line.starts_with("```sparql") {
                 in_sparql = true;
                 sparql_block.clear();
             } else if line.starts_with("```") && in_sparql {
                 in_sparql = false;
+
                 // Execute the SPARQL block
                 if sparql_block.contains("#\n") {
-                    // Advanced query with select and update parts
+                    // Advanced Query Detected
                     let parts: Vec<&str> = sparql_block.split("#\n").collect();
                     if parts.len() == 2 {
                         let (select_query, update_query) = (parts[0].trim(), parts[1].trim());
-                        self.iterative_update(select_query, update_query)?;
+                        match self.iterative_update(select_query, update_query) {
+                            Ok(_) => {
+                                count += 1;
+                            }
+                            Err(e) => {
+                                return Err((e, count));
+                            }
+                        };
                     } else {
-                        // Fallback to regular update if format is unexpected
-                        self.update(&sparql_block)?;
+                        // Regular Update Query
+                        match self.update(&sparql_block) {
+                            Ok(_) => {
+                                count += 1;
+                            }
+                            Err(e) => {
+                                return Err((e, count));
+                            }
+                        };
                     }
                 } else {
                     // Regular SPARQL update
-                    self.update(&sparql_block)?;
+                    match self.update(&sparql_block) {
+                        Ok(_) => {
+                            count += 1;
+                        }
+                        Err(e) => {
+                            return Err((e, count));
+                        }
+                    };
                 }
             } else if in_sparql {
                 sparql_block.push_str(line);
                 sparql_block.push('\n');
             } else if line.contains("::") && !line.starts_with("Dumping") {
-                // This is a routine execution line
+                // Executing a routine
                 let (file, proc) = line.split_once("::").unwrap();
                 let path = Path::new("routines").join(file);
 
@@ -640,12 +686,33 @@ impl KG {
                                             parts[0].trim(),
                                             parts[1].trim(),
                                         );
-                                        self.iterative_update(select_query, update_query)?;
+                                        match self.iterative_update(select_query, update_query) {
+                                            Ok(_) => {
+                                                count += 1;
+                                            }
+                                            Err(e) => {
+                                                return Err((e, count));
+                                            }
+                                        }
                                     } else {
-                                        self.update(&current_query)?;
+                                        match self.update(&current_query) {
+                                            Ok(_) => {
+                                                count += 1;
+                                            }
+                                            Err(e) => {
+                                                return Err((e, count));
+                                            }
+                                        };
                                     }
                                 } else {
-                                    self.update(&current_query)?;
+                                    match self.update(&current_query) {
+                                        Ok(_) => {
+                                            count += 1;
+                                        }
+                                        Err(e) => {
+                                            return Err((e, count));
+                                        }
+                                    };
                                 }
                                 break;
                             }
@@ -659,7 +726,7 @@ impl KG {
                         }
                     }
 
-                    // Handle case where procedure is at the end of file
+                    // Handle case last procedure
                     if in_proc && current_name == proc {
                         if is_advanced {
                             let parts: Vec<&str> = current_query.split("#\n").collect();
@@ -668,12 +735,33 @@ impl KG {
                                     parts[0].trim(),
                                     parts[1].trim(),
                                 );
-                                self.iterative_update(select_query, update_query)?;
+                                match self.iterative_update(select_query, update_query) {
+                                    Ok(_) => {
+                                        count += 1;
+                                    }
+                                    Err(e) => {
+                                        return Err((e, count));
+                                    }
+                                };
                             } else {
-                                self.update(&current_query)?;
+                                match self.update(&current_query) {
+                                    Ok(_) => {
+                                        count += 1;
+                                    }
+                                    Err(e) => {
+                                        return Err((e, count));
+                                    }
+                                };
                             }
                         } else {
-                            self.update(&current_query)?;
+                            match self.update(&current_query) {
+                                Ok(_) => {
+                                    count += 1;
+                                }
+                                Err(e) => {
+                                    return Err((e, count));
+                                }
+                            };
                         }
                     }
                 }
@@ -686,7 +774,7 @@ impl KG {
         Ok(())
     }
 
-    /// # Useful procedures
+    // # Useful procedures
 
     /// Counts the number of triples in the default graph.
     ///
@@ -798,7 +886,7 @@ WHERE  { {{s2}} ?p ?o }
         res
     }
 
-    /// Fetches detailed information for an entity given as a string IRI.
+    /// Fetches detailed information for an entity given as a stringet_countsg IRI.
     ///
     /// - Gathers all RDF types, the first `schema:name`, and the first `schema:description`.
     /// - Determines if the entity is an image type.
@@ -901,5 +989,771 @@ WHERE  { {{s2}} ?p ?o }
             imgs.push(img_path);
         }
         imgs
+    }
+
+    pub fn get_predicates(&self, otype: &str) -> Vec<String> {
+        let query = format!(r#"
+SELECT DISTINCT ?p WHERE {{
+    ?s a {otype}.
+    ?s ?p ?o.
+}}
+"#);
+        let mut res = vec![];
+        let query_result = match self.query(&query) {
+            Ok(result) => result,
+            Err(_) => panic!("get predicates query failed miserably"),
+        };
+        for r in query_result {
+            res.push(r.get("p").unwrap().to_string());
+        }
+        res
+    }
+
+    pub fn get_counts(&self, query: &str, vname: &str) -> Vec<f64> {
+        let mut res = vec![];
+        let query_result = match self.query(query) {
+            Ok(result) => result,
+            Err(_) => {
+                println!("{query}");
+                panic!("Invalid count query")
+            }
+        };
+        for r in query_result {
+            let val = match r.get(vname).unwrap() {
+                Literal(l) => l.value().parse::<f64>().unwrap(),
+                _ => panic!("invalid count query!!"),
+            };
+            res.push(val);
+        }
+        res
+    }
+
+    pub fn stat_anal_predicates(
+        &self,
+        otype: &str,
+        edge_rank: &HashMap<String, f64>
+    ) -> Option<Vec<(String, HashMap<String, f64>)>> {
+        let mut data = vec![];
+        let mut recalculate = true;
+        match
+            load_predicate_analysis(
+                &format!(
+                    "./data/{}/stat_anal/{}",
+                    self.dataset,
+                    otype.replace("<", "").replace(">", "").replace(":", "_").replace("/", "\\")
+                )
+            )
+        {
+            Ok((version, cached_data)) => {
+                if version == self.get_history().lines().count() {
+                    data = cached_data;
+                    recalculate = false;
+                    println!("{otype} analysis loaded");
+                }
+            }
+            Err(_) => (),
+        }
+
+        if recalculate {
+            let overall_count_query = format!(
+                r#"
+SELECT (COUNT (DISTINCT ?s) as ?cnt)
+WHERE {{
+        ?s a {otype}.
+}}
+"#
+            );
+
+            let object_count = *self.get_counts(&overall_count_query, "cnt").first().unwrap();
+
+            let predicates = self.get_predicates(otype);
+            let plen = predicates.len();
+            let filtered_predicates: Vec<_> = predicates
+                .iter()
+                .filter(|p| { *p != "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>" })
+                .collect();
+            data = filtered_predicates
+                .par_iter()
+                .map(|p| {
+                    (p.to_string(), self.stat_anal_single_predicate(otype, p, plen, object_count))
+                })
+                .filter(|r| { (r.1["uniqueness"] - 1.0).abs() > 0.0000000000000000001 })
+                .collect::<Vec<_>>();
+            if data.len() == 0 {
+                return None;
+            }
+            for (pred, scores) in data.iter_mut() {
+                scores.insert("edge_rank".to_string(), *edge_rank.get(pred).unwrap_or(&0.0));
+            }
+            normalize_column(&mut data, "entropy");
+            normalize_column(&mut data, "quality");
+
+            match
+                save_predicate_anlaysis(
+                    &format!(
+                        "./data/{}/stat_anal/{}",
+                        self.dataset,
+                        otype.replace("<", "").replace(">", "").replace(":", "_").replace("/", "\\")
+                    ),
+                    &data,
+                    self.get_history().lines().count()
+                )
+            {
+                Ok(_) => println!("{otype} analysis saved"),
+                Err(e) => {
+                    println!("error caching {otype} analysis: \n{}", e);
+                }
+            }
+        }
+        compute_scores(&mut data);
+
+        return Some(data);
+    }
+
+    fn stat_anal_single_predicate(
+        &self,
+        otype: &str,
+        predicate: &str,
+        total_predicates: usize,
+        object_count: f64
+    ) -> HashMap<String, f64> {
+        //         let overall_count_query = format!(
+        //             r#"
+        // SELECT (COUNT (DISTINCT ?s) as ?cnt)
+        // WHERE {{
+        //         ?s a {otype}.
+        // }}
+        // "#
+        //         );
+        let frequency_query = format!(
+            r#"
+SELECT (COUNT(DISTINCT ?s) as ?cnt)
+WHERE {{
+        ?s a {otype};
+        {predicate} ?o.
+}}
+        "#
+        );
+        let distinct_objects_query = format!(
+            r#"
+SELECT (COUNT(DISTINCT ?o) as ?cnt){{
+        ?s a {otype};
+        {predicate} ?o.
+}}        
+"#
+        );
+
+        let entropy_query = format!(
+            r#"
+SELECT (COUNT(?s) AS ?cnt) 
+WHERE {{
+    ?s a {otype}.
+    ?s {predicate} ?v.
+}} 
+GROUP BY ?v
+            
+            "#
+        );
+        let used_query = format!(
+            r#"
+SELECT (COUNT(?o) AS ?cnt) 
+WHERE {{
+    ?s a {otype}.
+    ?s {predicate} ?o.
+}}
+            
+            "#
+        );
+
+        let entity_quality_query = format!(
+            r#"
+        SELECT (COUNT(DISTINCT ?p2) as ?cnt) WHERE {{
+            ?s a {otype}.
+            ?s {predicate} ?o1.
+            ?s ?p2 ?o2.
+            FILTER(?p2!={predicate})
+        }}
+        GROUP BY ?s
+        "#
+        );
+
+        // let object_count = *self.get_counts(&overall_count_query, "cnt").first().unwrap();
+        let predicate_used = *self.get_counts(&frequency_query, "cnt").first().unwrap();
+        let distinct_objects = *self.get_counts(&distinct_objects_query, "cnt").first().unwrap();
+
+        let entropy_vals = self.get_counts(&entropy_query, "cnt");
+        let total_uses = *self.get_counts(&used_query, "cnt").first().unwrap();
+
+        let mut ent: f64 = 0.0;
+        for e in entropy_vals {
+            let p = e / total_uses;
+            ent -= p * p.log2();
+        }
+
+        let entity_quality = self.get_counts(&entity_quality_query, "cnt");
+        let mut quality = 0.0;
+        for q in entity_quality {
+            quality += (total_predicates as f64) / q;
+        }
+        let mut result = HashMap::new();
+        result.insert("frequency".to_string(), predicate_used / object_count);
+        result.insert("uniqueness".to_string(), distinct_objects / total_uses);
+        result.insert("entropy".to_string(), ent);
+        result.insert("quality".to_string(), quality);
+
+        result
+    }
+
+    pub fn stat_anal_types(
+        &self,
+        start_with: &str
+    ) -> Vec<(String, (f64, f64, f64, f64, i32, bool, f64))> {
+        let (mut graph, mut node_map) = self.calculate_class_relations_graph();
+        // let literal = node_map["Literal"];
+
+        // DFS Traversal starting from the main type
+
+        let mut order = remove_disconnected(&mut graph, &mut node_map, start_with.to_string());
+
+        // Calculating probabilities for each node
+        let mut node_counts: HashMap<String, f64> = HashMap::new();
+
+        for node in node_map.keys() {
+            if node == "Literal" {
+                continue;
+            }
+            let q = format!(
+                r#"
+            SELECT (COUNT(?s) as ?cnt) WHERE {{
+                ?s a {node}.
+            }}
+            "#
+            );
+            let cnt = *self.get_counts(&q, "cnt").get(0).unwrap();
+            node_counts.insert(node.clone(), cnt);
+        }
+
+        let level = 3;
+
+        let mut overall_stats = HashMap::new();
+
+        for i in 0..level {
+            calculate_probabilities_for_graph(&mut graph);
+
+            let (fpr, _) = self.page_rank(&graph, &node_map, &node_counts, Outgoing);
+            let (rpr, _) = self.page_rank(&graph, &node_map, &node_counts, Incoming);
+
+            let mut stats = vec![];
+            for (t, depth) in &order {
+                // println!("{}", t);
+                stats.push((t.clone(), node_counts[t], 1.0 / (1.0 + depth), fpr[t], rpr[t]));
+            }
+
+            let keep = self.rank(&stats, (1.0 + (i as f64)) / ((level as f64) + 1.0));
+
+            for (t, depth) in &order {
+                if overall_stats.contains_key(t) {
+                    *overall_stats.get_mut(t).unwrap() = (
+                        node_counts[t],
+                        1.0 / (1.0 + depth),
+                        fpr[t],
+                        rpr[t],
+                        i,
+                        keep.contains_key(t),
+                        *keep.get(t).unwrap_or(&0.0),
+                    );
+                } else {
+                    overall_stats.insert(t.clone(), (
+                        node_counts[t],
+                        1.0 / (1.0 + depth),
+                        *fpr.get(t).unwrap_or(&0.0),
+                        *rpr.get(t).unwrap_or(&0.0),
+                        i,
+                        keep.contains_key(t),
+                        *keep.get(t).unwrap_or(&0.0),
+                    ));
+                }
+            }
+            let keys_to_remove: Vec<String> = node_map
+                .keys()
+                .filter(|key| !(keep.contains_key(*key) || *key == "Literal"))
+                .cloned()
+                .collect();
+
+            // Sort node indices in descending order to remove from highest index first
+            let mut indices_to_remove: Vec<(String, NodeIndex)> = keys_to_remove
+                .iter()
+                .map(|key| (key.clone(), node_map[key]))
+                .collect();
+            indices_to_remove.sort_by(|a, b| b.1.index().cmp(&a.1.index()));
+
+            for (_, id) in indices_to_remove {
+                graph.remove_node(id);
+            }
+
+            // order = remove_disconnected(&mut graph, &mut node_map, start_with.to_string());
+
+            for o in &order {
+                println!("{}", o.0);
+            }
+            order = order
+                .iter()
+                .filter(|(n, _)| { keep.contains_key(n) })
+                .cloned()
+                .collect::<Vec<_>>();
+            println!("Round {i}");
+            node_map.clear();
+            for n in graph.node_indices() {
+                node_map.insert(graph[n].clone(), n);
+                // println!("{}", graph[n]);
+            }
+
+            let count_keys_to_remove: Vec<String> = node_counts
+                .keys()
+                .filter(|key| !node_map.contains_key(*key))
+                .cloned()
+                .collect();
+
+            for key in count_keys_to_remove {
+                node_counts.remove(&key);
+            }
+        }
+        let mut keep = vec![];
+        for n in graph.node_indices() {
+            if graph[n] != "Literal" {
+                keep.push(graph[n].clone());
+            }
+            println!("{}", graph[n]);
+        }
+        let mut result = overall_stats
+            .iter()
+            .map(|a| { (a.0.to_string(), *a.1) })
+            .collect::<Vec<_>>();
+        result.sort_by(|a, b| { b.1.4.cmp(&a.1.4).then_with(|| b.1.6.total_cmp(&a.1.6)) });
+
+        let mut scores = HashMap::new();
+        result.iter().for_each(|(n, (_, _, _, _, _, _, s))| {
+            scores.insert(n.to_string(), *s);
+        });
+        self.keep_types(keep);
+        self.fix_types(scores);
+
+        return result;
+
+        // self.keep_types(keep);
+    }
+
+    fn rank(&self, stats: &Vec<(String, f64, f64, f64, f64)>, limit: f64) -> HashMap<String, f64> {
+        let mut s = 0.0;
+        let total_count = stats
+            .iter()
+            .map(|(_, c, _, _, _)| *c)
+            .sum::<f64>();
+        let mut scores = stats
+            .iter()
+            .map(|(node, count, depth, fpr, rpr)| {
+                let score = (count / total_count).sqrt().sqrt() * depth.sqrt() * (fpr * 3.0 + rpr);
+                s += score.exp();
+
+                (node, score.exp())
+            })
+            .collect::<Vec<_>>();
+        for (_, score) in &mut scores {
+            *score = *score / s;
+        }
+
+        scores.sort_by(|a, b| { b.1.total_cmp(&a.1) });
+
+        // for s in &scores {
+        //     println!("{}: {}", s.0, s.1);
+        // }
+
+        let mut results = HashMap::new();
+        let mut limit = limit.clone();
+        let mut i = 0;
+        for (n, s) in &scores {
+            if limit <= 0.0 {
+                break;
+            }
+            results.insert(n.to_string(), *s);
+            limit -= s;
+            i += 1;
+        }
+        println!("Kept: {i}, Removed: {}", scores.len() - i);
+        results
+    }
+    pub fn keep_types(&self, keep: Vec<String>) {
+        let filter = keep.join(",");
+
+        let q = format!(
+            "
+DELETE {{
+    ?s a ?t .
+        }}
+WHERE {{
+    ?s a ?t .
+    FILTER( !(
+        ?t IN (
+        {filter}
+        )
+    ))
+        }}
+        
+        "
+        );
+
+        println!("{}", q);
+
+        match self.update(&q) {
+            Ok(_) => {
+                self.write_to_history(format!("```sparql\n{}\n```", q));
+                match
+                    self.execute("general.sparql::Remove entities withot type@advanced".to_string())
+                {
+                    Ok(_) => println!("Yeah"),
+                    Err(_) => println!("Noo"),
+                }
+            }
+            Err(_) => println!("NOOO"),
+        };
+    }
+
+    pub fn calculate_class_relations_graph(
+        &self
+    ) -> (Graph<String, (String, f64, Option<f64>, Option<f64>)>, HashMap<String, NodeIndex>) {
+        // Graph initialization
+        let mut graph: Graph<String, (String, f64, Option<f64>, Option<f64>)> = Graph::new();
+        let mut node_map: HashMap<String, NodeIndex> = HashMap::new();
+        node_map.insert("Literal".to_string(), graph.add_node("Literal".to_string()));
+        let mut adj_list = vec![];
+
+        // Checking for a cached version
+        let mut recalculate = false;
+        match load_relations(&format!("./data/{}.db/relation_counts", self.dataset.to_lowercase())) {
+            Ok((version, result)) => {
+                if version == self.get_history().lines().count() {
+                    adj_list = result;
+                } else {
+                    recalculate = true;
+                }
+            }
+            Err(_) => {
+                recalculate = true;
+            }
+        }
+
+        // Slower when cached, but acceptable
+        let classes_query = "SELECT DISTINCT ?t WHERE {
+            ?s a ?t.
+        }";
+        let types = match self.query(classes_query) {
+            Ok(result) =>
+                result
+                    .iter()
+                    .map(|sol| { sol.get("t").unwrap().to_string() })
+                    .collect::<Vec<_>>(),
+            Err(_) => panic!("Failed to fetch types. Failed miserably"),
+        };
+
+        //Doing the computation if no cached version
+        if recalculate {
+            let _ = self.execute("class_graph.sparql::Clear class relations graph".to_string());
+            for t in types {
+                let nid = graph.add_node(t.clone());
+                node_map.insert(t.clone(), nid);
+
+                let outgoing_edges_query = format!(
+                    r#"
+SELECT ?p ?t2 (COUNT(?o) as ?cnt) WHERE {{
+    ?s ?p ?o.
+    ?s a {t}.
+    OPTIONAL {{?o a ?t2}}
+}}
+GROUP BY ?p ?t2
+            "#
+                );
+                match self.query(&outgoing_edges_query) {
+                    Ok(result) =>
+                        result.iter().for_each(|r| {
+                            let itm = (
+                                t.clone(),
+                                r.get("p").unwrap().to_string(),
+                                match r.get("t2") {
+                                    Some(v) => v.to_string(),
+                                    None => "Literal".to_string(),
+                                },
+                                match r.get("cnt").unwrap() {
+                                    Literal(literal) => literal.value().parse::<f64>().unwrap(),
+                                    _ => panic!("Count is not a literal!!! Not possible"),
+                                },
+                            );
+                            // Keeping legacy class graph in the store
+                            if itm.2 != "Literal".to_string() {
+                                let q = &format!(
+                                    r#"
+INSERT DATA {{   
+    GRAPH <urn:class_relations> {{
+        {} {} {}.
+    }}
+}}"#,
+                                    itm.0,
+                                    itm.1,
+                                    itm.2
+                                );
+                                match self.update(q) {
+                                    Ok(_) => (),
+                                    Err(e) =>
+                                        match e {
+                                            StoreError::EvaluationError(err) => {
+                                                println!("{}", q);
+                                                println!("{}", err);
+                                            }
+                                            StoreError::UnsupportedError => (),
+                                        }
+                                }
+                            }
+                            if !(itm.1 == "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>") {
+                                adj_list.push(itm);
+                            }
+                        }),
+                    Err(_) => panic!("Something went wronnnnng!"),
+                };
+            }
+            match
+                save_relations(
+                    &format!("./data/{}.db/relation_counts", self.dataset.to_lowercase()),
+                    &adj_list,
+                    self.get_history().lines().count()
+                )
+            {
+                Ok(_) => println!("class graph saved"),
+                Err(_) => println!("error caching class graph"),
+            };
+        } else {
+            for t in types {
+                let nid = graph.add_node(t.clone());
+                node_map.insert(t.clone(), nid);
+            }
+        }
+
+        // Loading to a graph from the adjecency list
+        for e in adj_list {
+            graph.add_edge(node_map[&e.0], node_map[&e.2], (e.1, e.3, None, None));
+        }
+        (graph, node_map)
+    }
+
+    pub fn page_rank(
+        &self,
+        graph: &Graph<String, (String, f64, Option<f64>, Option<f64>)>,
+        node_map: &HashMap<String, NodeIndex>,
+        node_counts: &HashMap<String, f64>,
+        direction: petgraph::Direction
+    ) -> (HashMap<String, f64>, HashMap<String, HashMap<String, f64>>) {
+        let mut page_rank = HashMap::new();
+        let mut edge_rank = HashMap::new();
+        let mut ertotal = 0.0;
+        let mut total = 0.0;
+
+        let literal = node_map["Literal"];
+
+        for n in node_map.keys() {
+            page_rank.insert(n.clone(), 0.0);
+        }
+
+        for _ in 0..10000 {
+            let node = choice(&node_counts).unwrap();
+            let mut current = *node_map.get(&node).unwrap();
+            *page_rank.get_mut(&node).unwrap() += 1.0;
+            total += 1.0;
+
+            for _ in 0..10 {
+                let neighbors = graph.edges_directed(current, direction);
+                let mut edge_map: HashMap<EdgeIndex, f64> = HashMap::new();
+                for edge in neighbors {
+                    let id = edge.id();
+                    if direction == Outgoing {
+                        edge_map.insert(id, edge.weight().2.unwrap());
+                    } else {
+                        edge_map.insert(id, edge.weight().3.unwrap());
+                    }
+                }
+                if edge_map.is_empty() {
+                    break;
+                }
+                let follow = choice(&edge_map).unwrap();
+                let key = (graph[current].clone(), graph.edge_weight(follow).unwrap().0.clone());
+                if !edge_rank.contains_key(&key.0) {
+                    edge_rank.insert(key.0.clone(), HashMap::new());
+                }
+                if edge_rank.get(&key.0).unwrap().contains_key(&key.1) {
+                    *edge_rank.get_mut(&key.0).unwrap().get_mut(&key.1).unwrap() += 1.0;
+                } else {
+                    edge_rank.get_mut(&key.0).unwrap().insert(key.1, 1.0);
+                }
+                ertotal += 1.0;
+                let last = current.clone();
+                if direction == Outgoing {
+                    current = graph.edge_endpoints(follow).unwrap().1;
+                } else {
+                    current = graph.edge_endpoints(follow).unwrap().0;
+                }
+                if current == literal {
+                    *page_rank.get_mut(&graph[last]).unwrap() += graph
+                        .edge_weight(follow)
+                        .unwrap()
+                        .2.unwrap();
+                    break;
+                }
+                *page_rank.get_mut(&graph[current]).unwrap() += 1.0;
+                total += 1.0;
+            }
+        }
+        for (_, v) in &mut page_rank {
+            *v /= total;
+        }
+        for (_, hm) in &mut edge_rank {
+            for (_, v) in hm.iter_mut() {
+                *v /= ertotal;
+            }
+        }
+        (page_rank, edge_rank)
+    }
+
+    fn fix_types(&self, scores: HashMap<String, f64>) {
+        let q =
+            "
+        SELECT DISTINCT ?t1 ?t2  {{
+            ?s a ?t1.
+            ?s a ?t2.
+            FILTER (?t1!=?t2)
+        }}
+        LIMIT 1
+        ";
+
+        loop {
+            match self.query(&q) {
+                Ok(result) => {
+                    if result.is_empty() {
+                        break;
+                    }
+                    let r = result.get(0).unwrap();
+                    let t1 = r.get("t1").unwrap().to_string();
+                    let t2 = r.get("t2").unwrap().to_string();
+                    let (keep, skip) = if scores[&t1] > scores[&t2] { (t1, t2) } else { (t2, t1) };
+                    let query = format!(
+                        r#"
+                        DELETE {{
+                            ?s a {skip}.
+                        }}
+                        INSERT {{
+                            ?s <http://schema.org/additionaltype> {skip}.
+                        }}
+                        WHERE {{
+                            ?s a {skip}.
+                            ?s a {keep}.
+                        }}
+                    
+                    "#
+                    );
+                    match self.update(&query) {
+                        Ok(_) => {
+                            self.write_to_history(format!("```sparql\n{}\n```", query));
+                        }
+                        Err(_) => {
+                            panic!("ERROR");
+                        }
+                    }
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+    }
+    pub fn delete_predicate(&self, otype: &str, pred: &str) {
+        let q = format!(
+            r#"
+            DELETE {{
+                ?s {pred} ?pval.
+            }}
+            WHERE {{
+                ?s a {otype}.
+                ?s {pred} ?pval.
+            }}
+        
+        "#
+        );
+        match self.update(&q) {
+            Ok(_) => {
+                self.write_to_history(format!("```sparql\n{}\n```", q));
+            }
+            Err(_) => panic!("failed to delete predicate {pred} for type {otype}"),
+        }
+    }
+
+    pub fn analyse_objects(&self, otype: &str) -> i64 {
+        let mut cnt = 0;
+        let mut scores = HashMap::new();
+        match
+            load_predicate_analysis(
+                &format!(
+                    "./data/{}/stat_anal/{}",
+                    self.dataset,
+                    otype.replace("<", "").replace(">", "").replace(":", "_").replace("/", "\\")
+                )
+            )
+        {
+            Ok((_, mut data)) => {
+                compute_scores(&mut data);
+                data.iter().for_each(|(k, v)| {
+                    scores.insert(k.clone(), v.get("score").unwrap().clone());
+                });
+            }
+            Err(_) => (),
+        }
+        let mut sm = 0.0;
+        for (_, s) in &scores {
+            sm += s;
+        }
+        sm = sm / 2.0;
+
+        let q = format!(r#"
+        SELECT ?s {{
+            ?s a {otype}
+        }}
+        "#);
+
+        match self.query(&q) {
+            Ok(result) => {
+                for r in result {
+                    let s = r.get("s").unwrap();
+                    let qs = format!(
+                        r#"
+                        SELECT DISTINCT ?p WHERE {{
+                            {s} ?p ?v.
+                        }}
+                    "#
+                    );
+                    let preds = match self.query(&qs) {
+                        Ok(r) => {
+                            r.iter()
+                                .map(|sol| { sol.get("p").unwrap().to_string() })
+                                .collect::<Vec<_>>()
+                        }
+                        Err(_) => vec![],
+                    };
+                    let mut score = 0.0;
+                    for p in preds {
+                        score += scores.get(&p).unwrap_or(&0.0);
+                    }
+                    if score > sm {
+                        cnt += 1;
+                    }
+                }
+            }
+            Err(_) => panic!("Failed to analyse objects of type {otype}"),
+        }
+        cnt
     }
 }

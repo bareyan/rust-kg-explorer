@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html data-bs-theme="dark">
+  <head>
+    <title>Predicate Analysis</title>
+    <style type="text/css">
+      .green-row td {
+        background-color: green !important;
+      }
+      .red-row td {
+        background-color: red !important;
+      }
+      .orange-row td {
+        background-color: orange !important;
+      }
+    </style>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
+      crossorigin="anonymous"
+    />
+  </head>
+  <body>
+    [[nav]]
+
+    <div class="row justify-content-center px-5">[[classes]]</div>
+    <button id="delete-predicates-btn">Delete weak predicates</button>
+  </body>
+  <!-- 
+  <script>
+
+    document.addEventListener("DOMContentLoaded", function () {
+      // --- Main function to process each table ---
+      function enhanceTable(table) {
+        addCheckboxesToTable(table);
+        addDownloadButtonForTable(table);
+      }
+
+      // --- Function to add checkboxes for color switching ---
+      function addCheckboxesToTable(table) {
+        // Add a header for the new checkbox column
+        const headerRow = table.querySelector("thead tr");
+        if (headerRow) {
+          const th = document.createElement("th");
+          th.textContent = "Is Good";
+          headerRow.prepend(th); // Add to the beginning
+        }
+
+        // Add a checkbox to each body row
+        const bodyRows = table.querySelectorAll("tbody tr");
+        bodyRows.forEach((row) => {
+          const td = document.createElement("td");
+          td.style.textAlign = "center";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.className = "form-check-input";
+
+          // Set initial state based on row class
+          checkbox.checked = row.classList.contains("green-row");
+
+          // Add event listener to toggle classes
+          checkbox.addEventListener("change", function () {
+            if (this.checked) {
+              row.classList.remove("red-row");
+              row.classList.add("green-row");
+            } else {
+              row.classList.remove("green-row");
+              row.classList.add("red-row");
+            }
+          });
+
+          td.appendChild(checkbox);
+          row.prepend(td); // Add cell to the beginning of the row
+        });
+      }
+
+      // --- Function to add the "Download CSV" button ---
+      function addDownloadButtonForTable(table) {
+        const button = document.createElement("button");
+        button.textContent = "Download as CSV";
+        button.className = "btn btn-outline-primary btn-sm mb-2";
+
+        // Place button before the table
+        table.parentNode.insertBefore(button, table);
+
+        button.addEventListener("click", function () {
+          downloadTableAsCSV(table);
+        });
+      }
+
+      // --- CSV generation and download logic ---
+      function downloadTableAsCSV(table) {
+        const csvRows = [];
+
+        // 1. Get Headers
+        const headerCells = table.querySelectorAll("thead th");
+        const headers = Array.from(headerCells).map((th) =>
+          escapeCsvValue(th.textContent)
+        );
+        // Add the new column header for the color status
+        headers.push("is_good_predicate");
+        csvRows.push(headers.join(","));
+
+        // 2. Get Body Rows
+        const bodyRows = table.querySelectorAll("tbody tr");
+        bodyRows.forEach((row) => {
+          const isGood = row.classList.contains("green-row");
+          const cells = row.querySelectorAll("td");
+
+          // Start from the second cell to skip our checkbox column
+          const rowValues = Array.from(cells)
+            .slice(1)
+            .map((td) => escapeCsvValue(td.textContent));
+
+          // Add the boolean value for the color
+          rowValues.push(isGood);
+
+          csvRows.push(rowValues.join(","));
+        });
+
+        const csvString = csvRows.join("\n");
+
+        // Generate a filename from the table's title
+        const cardHeader = table
+          .closest(".card")
+          .querySelector(".card-header h3");
+        let filename = "table_data.csv";
+        if (cardHeader) {
+          // Sanitize the title to make a valid filename
+          filename =
+            cardHeader.textContent.trim().replace(/[^a-zA-Z0-9.-]/g, "_") +
+            ".csv";
+        }
+
+        triggerCsvDownload(csvString, filename);
+      }
+
+      // --- Helper function to escape values for CSV ---
+      function escapeCsvValue(value) {
+        const stringValue = String(value || "").trim();
+        // If value contains comma, double quote, or newline, wrap it in double quotes
+        if (/[",\n]/.test(stringValue)) {
+          // Also, double up any existing double quotes
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      }
+
+      // --- Helper function to trigger the file download ---
+      function triggerCsvDownload(csvString, filename) {
+        const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+          const url = URL.createObjectURL(blob);
+          link.setAttribute("href", url);
+          link.setAttribute("download", filename);
+          link.style.visibility = "hidden";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      // --- Find all tables in cards and enhance them ---
+      const tablesToEnhance = document.querySelectorAll(".card .table");
+      tablesToEnhance.forEach(enhanceTable);
+    });
+  </script> -->
+
+  <!-- <script>
+    document.querySelectorAll("th").forEach((th, colIndex) => {
+      th.addEventListener("click", () => {
+        const table = th.closest("table");
+        const tbody = table.querySelector("tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+
+        // Clear sort indicators on other headers
+        table
+          .querySelectorAll("th")
+          .forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+
+        // Toggle sort direction
+        let ascending = !th.classList.contains("sort-asc");
+        th.classList.toggle("sort-asc", ascending);
+        th.classList.toggle("sort-desc", !ascending);
+
+        rows.sort((a, b) => {
+          let valA = a.children[colIndex].innerText.trim();
+          let valB = b.children[colIndex].innerText.trim();
+
+          // If both values are numbers, compare numerically
+          let numA = parseFloat(valA),
+            numB = parseFloat(valB);
+          if (!isNaN(numA) && !isNaN(numB)) {
+            return ascending ? numA - numB : numB - numA;
+          }
+
+          // Otherwise compare as strings
+          return ascending
+            ? valA.localeCompare(valB)
+            : valB.localeCompare(valA);
+        });
+
+        rows.forEach((row) => tbody.appendChild(row));
+      });
+    });
+  </script> -->
+  >
+  <script>
+    let preds_to_delete = [[[preds_to_delete]]];
+    document.getElementById("delete-predicates-btn").onclick = function () {
+      if (
+        confirm(
+          `Are you sure you want to delete ${preds_to_delete.length} predicates? This action cannot be undone.`
+        )
+      ) {
+        deletePredicates();
+      }
+    };
+    function deletePredicates() {
+      for (const pred of preds_to_delete) {
+        fetch(
+          `/delete_predicate?otype=${encodeURIComponent(
+            pred.class
+          )}&pred=${encodeURIComponent(pred.pred)}`
+        )
+          .then((response) => response.json())
+          .then((data) => console.log("Deleted:", data))
+          .catch((error) => console.error("Error:", error));
+        console.log(pred);
+      }
+    }
+  </script>
+</html>

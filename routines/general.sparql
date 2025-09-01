@@ -68,6 +68,99 @@ WHERE {
 	}
 }
 
+## Remove metadata object types(readaction, searchaction, etc.)
+
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/readaction>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/readaction>.
+    ?s ?p ?o.
+};
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/writeaction>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/writeaction>.
+    ?s ?p ?o.
+};
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/commentaction>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/commentaction>.
+    ?s ?p ?o.
+};
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/searchaction>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/searchaction>.
+    ?s ?p ?o.
+};
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/findaction>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/findaction>.
+    ?s ?p ?o.
+};
+DELETE {
+    ?sub ?p ?s
+}
+WHERE {
+    ?s a <http://schema.org/entrypoint>.
+    ?sub ?p ?s.
+};
+
+DELETE {
+    ?s ?p ?o.
+}
+WHERE {
+    ?s a <http://schema.org/entrypoint>.
+    ?s ?p ?o.
+}
+
 ## Merge geocoordinates@advanced
 
 SELECT ?s1 ?s2 WHERE {
@@ -84,3 +177,30 @@ WHERE  { ?sub ?pred {{s2}} };
 DELETE { {{s2}} ?p ?o }
 INSERT { {{s1}} ?p ?o }
 WHERE  { {{s2}} ?p ?o }
+
+## Remove entities withot type@advanced
+
+SELECT DISTINCT ?s WHERE {
+	?s ?p ?o.
+	FILTER NOT EXISTS{
+		?s a ?type
+	}
+}
+#
+DELETE {
+	{{s}} ?p ?o.
+}
+WHERE {
+	{{s}} ?p ?o.
+}
+
+## Delete entities without type annotation
+DELETE {
+	?s ?p ?o
+}
+WHERE {
+	?s ?p ?o.
+	FILTER NOT EXISTS {
+		?s a ?t.
+	}
+}
