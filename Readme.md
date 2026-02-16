@@ -2,7 +2,10 @@
 
 A simple web-based knowledge graph explorer built with Rust.
 
-<video src="video.mp4" controls fullscreen allowfullscreen></video>
+
+https://github.com/user-attachments/assets/f7e6c062-c91e-4dd3-8356-77f37bd5947d
+
+
 
 ## Overview
 
