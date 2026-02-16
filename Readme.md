@@ -2,6 +2,8 @@
 
 A simple web-based knowledge graph explorer built with Rust.
 
+<video src="video.mp4" controls fullscreen allowfullscreen></video>
+
 ## Overview
 
 Rust KG Explorer provides a lightweight web UI to explore and query a knowledge graph. It supports browsing entities and executing SPARQL queries.
